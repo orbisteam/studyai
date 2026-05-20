@@ -135,7 +135,7 @@ python ia_service.py '{"tipo":"geração_de_lições","conteúdo_estudo":"Python
 ### App Mobile
 1. Acesse [MIT App Inventor](https://ai2.appinventor.mit.edu)
 2. **Projects** → **Import project (.aia) from my computer**
-3. Selecione `StudyAI_updated.aia`
+3. Selecione `StudyAI.aia`
 
 ---
 

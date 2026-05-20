@@ -24,12 +24,9 @@ Um serviço Python responsável por orquestrar as requisições de inteligência
 - **Função**: Recebe payloads JSON contextuais (nível do aluno, histórico, erros) e gera conteúdo educacional estruturado (lições, quizzes, planos de estudo, correções).
 - **Execução**: Via linha de comando, retornando JSON padronizado.
 
-### 2. Backend / API (`api.js` / `hps_server.py`)
+### 2. Backend / API (`api.js`)
 O núcleo do servidor que gerencia autenticação, banco de dados e comunicação em tempo real.
 - **Tecnologias**: Node.js/Express + Python (aiohttp/Socket.IO)
-- **Banco de Dados**: SQLite (usuários, conteúdo, reputação, DNS)
-- **Segurança**: Autenticação via chaves RSA, Proof-of-Work (PoW) para login, sistema de reputação e rate limiting.
-- **Real-time**: Socket.IO para comunicação bidirecional com clientes e sincronização de rede.
 
 ### 3. Frontend Web (`public/cer.html`)
 A interface principal da plataforma de estudos (versão 3.0).

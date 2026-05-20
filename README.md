@@ -59,8 +59,7 @@ Aplicativo Android nativo criado no MIT App Inventor.
 | `public/new.html` | Interface web anterior (v2.0) |
 | `public/old.html` | Interface legado (v1.0) |
 | `public/index.html` | Página de seleção de versão |
-| `public/StudyAI_updated.aia` | Projeto MIT App Inventor (atualizado) |
-| `public/StudyAI.aia` | Projeto MIT App Inventor (original) |
+| `public/StudyAI.aia` | Projeto MIT App Inventor |
 
 ---
 

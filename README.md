@@ -52,7 +52,8 @@ Aplicativo Android nativo criado no MIT App Inventor.
 | `ia_service-huggingface.py` | Versão alternativa para Hugging Face |
 | `api.js` | Backend principal (API + Socket.IO) |
 | `package.json` | Dependências do Node.js |
-| `public/cer.html` | Interface web principal (v3.0) |
+| `public/mai.html` | Interface adaptada ao MIT App Inventor (MAI) |
+| `public/cer.html` | Interface web anterior (v3.0) |
 | `public/new.html` | Interface web anterior (v2.0) |
 | `public/old.html` | Interface legado (v1.0) |
 | `public/index.html` | Página de seleção de versão |

@@ -1,0 +1,3411 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>StudyAI - Plataforma de Estudo Inteligente</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/vue@2.6.14/dist/vue.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <style>
+        :root {
+            --primary: #6366f1;
+            --primary-dark: #4f46e5;
+            --primary-light: #8b5cf6;
+            --secondary: #64748b;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --info: #06b6d4;
+            
+            --bg-primary: #0f172a;
+            --bg-secondary: #1e293b;
+            --bg-card: #334155;
+            --bg-hover: #475569;
+            
+            --text-primary: #f1f5f9;
+            --text-secondary: #cbd5e1;
+            --text-muted: #94a3b8;
+            
+            --border: #475569;
+            --shadow: rgba(0, 0, 0, 0.25);
+            
+            --gradient-primary: linear-gradient(135deg, #6366f1, #8b5cf6);
+            --gradient-success: linear-gradient(135deg, #10b981, #34d399);
+            --gradient-warning: linear-gradient(135deg, #f59e0b, #fbbf24);
+            --gradient-danger: linear-gradient(135deg, #ef4444, #f87171);
+            
+            --radius-sm: 8px;
+            --radius-md: 12px;
+            --radius-lg: 16px;
+            --radius-xl: 24px;
+        }
+
+        .light-mode {
+            --bg-primary: #f8fafc;
+            --bg-secondary: #f1f5f9;
+            --bg-card: #ffffff;
+            --bg-hover: #e2e8f0;
+            
+            --text-primary: #0f172a;
+            --text-secondary: #334155;
+            --text-muted: #64748b;
+            
+            --border: #cbd5e1;
+            --shadow: rgba(0, 0, 0, 0.08);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            line-height: 1.6;
+            transition: all 0.3s ease;
+            overflow-x: hidden;
+        }
+
+        #app {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .header {
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border);
+            padding: 1rem 2rem;
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+            backdrop-filter: blur(10px);
+        }
+
+        .header-content {
+            max-width: 1400px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--text-primary);
+            text-decoration: none;
+        }
+
+        .logo-icon {
+            background: var(--gradient-primary);
+            padding: 0.5rem;
+            border-radius: var(--radius-md);
+            color: white;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 0.5rem;
+            align-items: center;
+        }
+
+        .nav-link {
+            color: var(--text-secondary);
+            text-decoration: none;
+            padding: 0.75rem 1.25rem;
+            border-radius: var(--radius-md);
+            transition: all 0.3s ease;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .nav-link:hover {
+            color: var(--text-primary);
+            background: var(--bg-hover);
+        }
+
+        .nav-link.active {
+            background: var(--primary);
+            color: white;
+        }
+
+        .user-actions {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .main-content {
+            flex: 1;
+            padding: 2rem;
+            max-width: 1400px;
+            margin: 0 auto;
+            width: 100%;
+        }
+
+        .card {
+            background: var(--bg-card);
+            border-radius: var(--radius-lg);
+            padding: 1.5rem;
+            box-shadow: 0 4px 20px var(--shadow);
+            border: 1px solid var(--border);
+            transition: all 0.3s ease;
+        }
+
+        .card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 30px var(--shadow);
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: between;
+            align-items: center;
+            margin-bottom: 1.5rem;
+            flex-wrap: wrap;
+            gap: 1rem;
+        }
+
+        .card-title {
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin: 0;
+        }
+
+        .grid {
+            display: grid;
+            gap: 1.5rem;
+        }
+
+        .grid-2 {
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+        }
+
+        .grid-3 {
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        }
+
+        .grid-4 {
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.75rem 1.5rem;
+            border: none;
+            border-radius: var(--radius-md);
+            font-weight: 600;
+            font-size: 0.875rem;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-decoration: none;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .btn::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+            transition: left 0.5s;
+        }
+
+        .btn:hover::before {
+            left: 100%;
+        }
+
+        .btn-primary {
+            background: var(--gradient-primary);
+            color: white;
+        }
+
+        .btn-success {
+            background: var(--gradient-success);
+            color: white;
+        }
+
+        .btn-warning {
+            background: var(--gradient-warning);
+            color: white;
+        }
+
+        .btn-danger {
+            background: var(--gradient-danger);
+            color: white;
+        }
+
+        .btn-outline {
+            background: transparent;
+            border: 2px solid var(--primary);
+            color: var(--primary);
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none !important;
+        }
+
+        .btn:disabled::before {
+            display: none;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+        }
+
+        .stat-card {
+            background: var(--bg-secondary);
+            padding: 1.5rem;
+            border-radius: var(--radius-lg);
+            text-align: center;
+            border: 1px solid var(--border);
+            transition: all 0.3s ease;
+        }
+
+        .stat-card:hover {
+            transform: translateY(-2px);
+            border-color: var(--primary);
+        }
+
+        .stat-value {
+            font-size: 2rem;
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+            background: var(--gradient-primary);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .stat-label {
+            color: var(--text-muted);
+            font-size: 0.875rem;
+            font-weight: 500;
+        }
+
+        .progress-container {
+            margin: 1rem 0;
+        }
+
+        .progress-header {
+            display: flex;
+            justify-content: between;
+            margin-bottom: 0.5rem;
+        }
+
+        .progress-bar {
+            height: 8px;
+            background: var(--bg-secondary);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: var(--gradient-primary);
+            border-radius: 4px;
+            transition: width 0.5s ease;
+            position: relative;
+        }
+
+        .form-group {
+            margin-bottom: 1.5rem;
+        }
+
+        .form-label {
+            display: block;
+            margin-bottom: 0.5rem;
+            color: var(--text-primary);
+            font-weight: 500;
+        }
+
+        .form-input {
+            width: 100%;
+            padding: 0.75rem 1rem;
+            background: var(--bg-secondary);
+            border: 2px solid var(--border);
+            border-radius: var(--radius-md);
+            color: var(--text-primary);
+            font-size: 1rem;
+            transition: all 0.3s ease;
+        }
+
+        .form-input:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+        }
+
+        .topic-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+            padding: 1.5rem;
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+
+        .topic-card:hover {
+            border-color: var(--primary);
+            transform: translateY(-2px);
+        }
+
+        .topic-card.active {
+            border-color: var(--primary);
+            background: linear-gradient(135deg, var(--bg-secondary), rgba(99, 102, 241, 0.1));
+        }
+
+        .topic-status {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .status-pending {
+            background: rgba(239, 68, 68, 0.2);
+            color: var(--danger);
+        }
+
+        .status-in-progress {
+            background: rgba(245, 158, 11, 0.2);
+            color: var(--warning);
+        }
+
+        .status-completed {
+            background: rgba(16, 185, 129, 0.2);
+            color: var(--success);
+        }
+
+        .question-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+            padding: 1.5rem;
+            margin-bottom: 1rem;
+            transition: all 0.3s ease;
+        }
+
+        .question-card.correct {
+            border-color: var(--success);
+            background: rgba(16, 185, 129, 0.1);
+        }
+
+        .question-card.incorrect {
+            border-color: var(--danger);
+            background: rgba(239, 68, 68, 0.1);
+        }
+
+        .question-text {
+            font-size: 1.1rem;
+            font-weight: 600;
+            margin-bottom: 1rem;
+            color: var(--text-primary);
+        }
+
+        .options-grid {
+            display: grid;
+            gap: 0.75rem;
+        }
+
+        .option-item {
+            padding: 1rem 1.25rem;
+            background: var(--bg-card);
+            border: 2px solid var(--border);
+            border-radius: var(--radius-md);
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .option-item:hover {
+            border-color: var(--primary);
+            background: var(--bg-hover);
+        }
+
+        .option-item.selected {
+            border-color: var(--primary);
+            background: rgba(99, 102, 241, 0.1);
+        }
+
+        .option-item.correct {
+            border-color: var(--success);
+            background: rgba(16, 185, 129, 0.2);
+        }
+
+        .option-item.incorrect {
+            border-color: var(--danger);
+            background: rgba(239, 68, 68, 0.2);
+        }
+
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(15, 23, 42, 0.8);
+            backdrop-filter: blur(8px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 2000;
+            padding: 1rem;
+        }
+
+        .modal-content {
+            background: var(--bg-card);
+            border-radius: var(--radius-xl);
+            max-width: 900px;
+            width: 100%;
+            max-height: 90vh;
+            overflow: hidden;
+            box-shadow: 0 25px 50px var(--shadow);
+            border: 1px solid var(--border);
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: between;
+            align-items: center;
+            padding: 1.5rem 2rem;
+            border-bottom: 1px solid var(--border);
+            background: var(--bg-secondary);
+        }
+
+        .modal-body {
+            padding: 2rem;
+            overflow-y: auto;
+            max-height: calc(90vh - 120px);
+        }
+
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid transparent;
+            border-top: 3px solid currentColor;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 3rem 2rem;
+            color: var(--text-muted);
+        }
+
+        .empty-state-icon {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+            opacity: 0.5;
+        }
+
+        .notification {
+            position: fixed;
+            top: 2rem;
+            right: 2rem;
+            padding: 1rem 1.5rem;
+            border-radius: var(--radius-lg);
+            color: white;
+            font-weight: 500;
+            z-index: 3000;
+            transform: translateX(400px);
+            transition: transform 0.3s ease;
+            max-width: 400px;
+        }
+
+        .notification.show {
+            transform: translateX(0);
+        }
+
+        .notification.success {
+            background: var(--success);
+        }
+
+        .notification.error {
+            background: var(--danger);
+        }
+
+        .notification.warning {
+            background: var(--warning);
+        }
+
+        @media (max-width: 768px) {
+            .header {
+                padding: 1rem;
+            }
+
+            .header-content {
+                flex-direction: column;
+                gap: 1rem;
+            }
+
+            .nav-links {
+                order: 3;
+                width: 100%;
+                justify-content: center;
+                flex-wrap: wrap;
+            }
+
+            .main-content {
+                padding: 1rem;
+            }
+
+            .grid-2, .grid-3, .grid-4 {
+                grid-template-columns: 1fr;
+            }
+
+            .modal-content {
+                margin: 1rem;
+            }
+
+            .modal-header, .modal-body {
+                padding: 1.25rem;
+            }
+
+            .stats-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+
+        @media (max-width: 480px) {
+            .nav-links {
+                flex-direction: column;
+                width: 100%;
+            }
+
+            .nav-link {
+                width: 100%;
+                justify-content: center;
+            }
+
+            .stats-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .notification {
+                right: 1rem;
+                left: 1rem;
+                max-width: none;
+            }
+        }
+
+        .theme-toggle {
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            cursor: pointer;
+            padding: 0.5rem;
+            border-radius: var(--radius-md);
+            transition: all 0.3s ease;
+        }
+
+        .theme-toggle:hover {
+            color: var(--text-primary);
+            background: var(--bg-hover);
+        }
+
+        .lesson-content {
+            line-height: 1.8;
+        }
+
+        .lesson-section {
+            margin-bottom: 2rem;
+        }
+
+        .example-box {
+            background: rgba(99, 102, 241, 0.1);
+            border-left: 4px solid var(--primary);
+            padding: 1.25rem;
+            border-radius: var(--radius-md);
+            margin: 1rem 0;
+        }
+
+        .timer {
+            background: var(--gradient-warning);
+            color: white;
+            padding: 0.75rem 1.5rem;
+            border-radius: var(--radius-lg);
+            font-weight: 600;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .help-counter {
+            background: var(--warning);
+            color: white;
+            padding: 0.25rem 0.75rem;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            margin-left: 0.5rem;
+        }
+
+        .chat-container {
+            display: flex;
+            flex-direction: column;
+            height: 400px;
+            background: var(--bg-secondary);
+            border-radius: var(--radius-lg);
+            overflow: hidden;
+            border: 1px solid var(--border);
+        }
+
+        .chat-messages {
+            flex: 1;
+            padding: 1.5rem;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        .chat-message {
+            padding: 1rem 1.25rem;
+            border-radius: var(--radius-lg);
+            max-width: 80%;
+            line-height: 1.5;
+        }
+
+        .chat-message.user {
+            background: var(--primary);
+            color: white;
+            align-self: flex-end;
+            border-bottom-right-radius: var(--radius-sm);
+        }
+
+        .chat-message.assistant {
+            background: var(--bg-card);
+            color: var(--text-primary);
+            align-self: flex-start;
+            border-bottom-left-radius: var(--radius-sm);
+        }
+
+        .chat-input-container {
+            display: flex;
+            padding: 1rem;
+            border-top: 1px solid var(--border);
+            background: var(--bg-card);
+        }
+
+        .chat-input {
+            flex: 1;
+            background: var(--bg-secondary);
+            border: 2px solid var(--border);
+            border-radius: var(--radius-md);
+            padding: 0.75rem 1rem;
+            color: var(--text-primary);
+            font-size: 1rem;
+        }
+
+        .chat-input:focus {
+            outline: none;
+            border-color: var(--primary);
+        }
+
+        .achievement-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            background: var(--gradient-warning);
+            color: white;
+            padding: 0.5rem 1rem;
+            border-radius: 20px;
+            font-size: 0.875rem;
+            font-weight: 600;
+        }
+
+        .progress-milestones {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 0.5rem;
+            position: relative;
+        }
+
+        .milestone {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            position: relative;
+            z-index: 2;
+        }
+
+        .milestone-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: var(--bg-secondary);
+            border: 2px solid var(--border);
+            margin-bottom: 0.5rem;
+            transition: all 0.3s ease;
+        }
+
+        .milestone.active .milestone-dot {
+            background: var(--primary);
+            border-color: var(--primary);
+        }
+
+        .milestone.completed .milestone-dot {
+            background: var(--success);
+            border-color: var(--success);
+        }
+
+        .milestone-label {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            text-align: center;
+            font-weight: 500;
+        }
+
+        .milestone.active .milestone-label {
+            color: var(--primary);
+        }
+
+        .milestone.completed .milestone-label {
+            color: var(--success);
+        }
+
+        .teacher-id-badge {
+            background: var(--gradient-primary);
+            color: white;
+            padding: 0.5rem 1rem;
+            border-radius: var(--radius-md);
+            font-family: monospace;
+            font-size: 0.875rem;
+            cursor: pointer;
+        }
+
+        .forum-category {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+            padding: 1.5rem;
+            margin-bottom: 1rem;
+            transition: all 0.3s ease;
+        }
+
+        .forum-category:hover {
+            border-color: var(--primary);
+        }
+
+        .forum-post {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+            padding: 1.5rem;
+            margin-bottom: 1rem;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .forum-post:hover {
+            border-color: var(--primary);
+            transform: translateY(-1px);
+        }
+
+        .forum-post.pinned {
+            border-color: var(--warning);
+            background: rgba(245, 158, 11, 0.05);
+        }
+
+        .forum-reply {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+            padding: 1.25rem;
+            margin-bottom: 1rem;
+        }
+
+        .forum-reply.solution {
+            border-color: var(--success);
+            background: rgba(16, 185, 129, 0.05);
+        }
+
+        .certificate-card {
+            background: var(--bg-secondary);
+            border: 2px solid var(--warning);
+            border-radius: var(--radius-lg);
+            padding: 2rem;
+            text-align: center;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .certificate-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(45deg, transparent, rgba(245, 158, 11, 0.1), transparent);
+        }
+
+        .student-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+            padding: 1.5rem;
+            transition: all 0.3s ease;
+        }
+
+        .student-card:hover {
+            border-color: var(--primary);
+            transform: translateY(-2px);
+        }
+
+        .admin-tools {
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid var(--danger);
+            border-radius: var(--radius-lg);
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .role-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.25rem 0.75rem;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .role-student {
+            background: rgba(99, 102, 241, 0.2);
+            color: var(--primary);
+        }
+
+        .role-teacher {
+            background: rgba(245, 158, 11, 0.2);
+            color: var(--warning);
+        }
+
+        .role-admin {
+            background: rgba(239, 68, 68, 0.2);
+            color: var(--danger);
+        }
+
+        .verification-result {
+            padding: 2rem;
+            text-align: center;
+            border-radius: var(--radius-lg);
+            margin-bottom: 2rem;
+        }
+
+        .verification-valid {
+            background: rgba(16, 185, 129, 0.1);
+            border: 2px solid var(--success);
+        }
+
+        .verification-invalid {
+            background: rgba(239, 68, 68, 0.1);
+            border: 2px solid var(--danger);
+        }
+    </style>
+</head>
+<body :class="{ 'light-mode': !darkMode }">
+    <div id="app">
+        <!-- Notifications -->
+        <div v-if="notification.show" class="notification" :class="[notification.type, { show: notification.show }]">
+            <i :class="notification.icon"></i> {{ notification.message }}
+        </div>
+
+        <!-- Header -->
+        <header class="header" v-if="isAuthenticated">
+            <div class="header-content">
+                <a href="#" class="logo" @click.prevent="changeView('dashboard')">
+                    <div class="logo-icon">
+                        <i class="fas fa-brain"></i>
+                    </div>
+                    StudyAI
+                </a>
+
+                <nav class="nav-links">
+                    <a href="#" class="nav-link" :class="{ active: currentView === 'dashboard' }" 
+                       @click.prevent="changeView('dashboard')">
+                        <i class="fas fa-chart-pie"></i>
+                        Dashboard
+                    </a>
+                    <a href="#" class="nav-link" :class="{ active: currentView === 'themes' }" 
+                       @click.prevent="changeView('themes')">
+                        <i class="fas fa-book-open"></i>
+                        Meus Temas
+                    </a>
+                    <a href="#" class="nav-link" :class="{ active: currentView === 'study' }" 
+                       @click.prevent="selectedTheme ? null : changeView('themes')"
+                       :title="!selectedTheme ? 'Selecione um tema primeiro' : ''">
+                        <i class="fas fa-graduation-cap"></i>
+                        Estudar
+                    </a>
+                    <a href="#" class="nav-link" :class="{ active: currentView === 'certificates' }" 
+                       @click.prevent="changeView('certificates')">
+                        <i class="fas fa-award"></i>
+                        Certificados
+                    </a>
+                    <a href="#" class="nav-link" :class="{ active: currentView === 'forum' }" 
+                       @click.prevent="changeView('forum')">
+                        <i class="fas fa-comments"></i>
+                        Fórum
+                    </a>
+                    <a href="#" class="nav-link" :class="{ active: currentView === 'teacher' }" 
+                       v-if="user.role === 'teacher' || user.role === 'admin'" 
+                       @click.prevent="changeView('teacher')">
+                        <i class="fas fa-chalkboard-teacher"></i>
+                        Painel do Professor
+                    </a>
+                    <a href="#" class="nav-link" :class="{ active: currentView === 'admin' }" 
+                       v-if="user.role === 'admin'" 
+                       @click.prevent="changeView('admin')">
+                        <i class="fas fa-cogs"></i>
+                        Administração
+                    </a>
+                    <a href="#" class="nav-link" :class="{ active: currentView === 'history' }" 
+                       @click.prevent="changeView('history')">
+                        <i class="fas fa-history"></i>
+                        Histórico
+                    </a>
+                </nav>
+
+                <div class="user-actions">
+                    <button class="theme-toggle" @click="toggleTheme">
+                        <i :class="darkMode ? 'fas fa-sun' : 'fas fa-moon'"></i>
+                    </button>
+                    <div class="achievement-badge">
+                        <i class="fas fa-trophy"></i>
+                        {{ userStats.current_level || 'Iniciante' }}
+                    </div>
+                    <div class="role-badge" :class="'role-' + user.role">
+                        <i class="fas fa-user"></i>
+                        {{ user.role === 'student' ? 'Aluno' : user.role === 'teacher' ? 'Professor' : 'Administrador' }}
+                    </div>
+                    <button class="btn btn-outline" @click="logout">
+                        <i class="fas fa-sign-out-alt"></i>
+                        Sair
+                    </button>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Auth Screens -->
+            <div v-if="!isAuthenticated">
+                <div class="grid grid-2" style="max-width: 1000px; margin: 2rem auto;">
+                    <!-- Login Card -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h2 class="card-title">Acessar StudyAI</h2>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label class="form-label">Usuário</label>
+                            <input type="text" class="form-input" v-model="loginForm.username" 
+                                   placeholder="Digite seu usuário" :disabled="loadingLogin">
+                        </div>
+                        
+                        <div class="form-group">
+                            <label class="form-label">Senha</label>
+                            <input type="password" class="form-input" v-model="loginForm.password" 
+                                   placeholder="Digite sua senha" :disabled="loadingLogin">
+                        </div>
+                        
+                        <button class="btn btn-primary" style="width: 100%;" @click="login" :disabled="loadingLogin">
+                            <span class="loading" v-if="loadingLogin"></span>
+                            <i class="fas fa-sign-in-alt" v-else></i>
+                            {{ loadingLogin ? 'Entrando...' : 'Entrar' }}
+                        </button>
+                        
+                        <div style="text-align: center; margin-top: 1.5rem;">
+                            <p style="color: var(--text-muted);">Não tem conta?</p>
+                            <button class="btn btn-outline" style="width: 100%; margin-top: 0.5rem;" 
+                                    @click="showRegister = true">
+                                <i class="fas fa-user-plus"></i>
+                                Criar Nova Conta
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Welcome Card -->
+                    <div class="card" style="background: var(--gradient-primary); color: white;">
+                        <div style="padding: 2rem;">
+                            <h2 style="font-size: 2rem; margin-bottom: 1rem; font-weight: 700;">
+                                Bem-vindo ao StudyAI
+                            </h2>
+                            <p style="font-size: 1.1rem; margin-bottom: 2rem; opacity: 0.9;">
+                                Sua plataforma inteligente de aprendizado personalizado com IA
+                            </p>
+                            
+                            <div style="display: flex; flex-direction: column; gap: 1.5rem;">
+                                <div style="display: flex; align-items: center; gap: 1rem;">
+                                    <div style="background: rgba(255,255,255,0.2); padding: 1rem; border-radius: var(--radius-lg);">
+                                        <i class="fas fa-robot" style="font-size: 1.5rem;"></i>
+                                    </div>
+                                    <div>
+                                        <h3 style="font-weight: 600; margin-bottom: 0.25rem;">IA Personalizada</h3>
+                                        <p style="opacity: 0.9;">Conteúdo adaptado ao seu nível e ritmo</p>
+                                    </div>
+                                </div>
+                                
+                                <div style="display: flex; align-items: center; gap: 1rem;">
+                                    <div style="background: rgba(255,255,255,0.2); padding: 1rem; border-radius: var(--radius-lg);">
+                                        <i class="fas fa-chart-line" style="font-size: 1.5rem;"></i>
+                                    </div>
+                                    <div>
+                                        <h3 style="font-weight: 600; margin-bottom: 0.25rem;">Progresso Detalhado</h3>
+                                        <p style="opacity: 0.9;">Acompanhamento completo do seu desenvolvimento</p>
+                                    </div>
+                                </div>
+                                
+                                <div style="display: flex; align-items: center; gap: 1rem;">
+                                    <div style="background: rgba(255,255,255,0.2); padding: 1rem; border-radius: var(--radius-lg);">
+                                        <i class="fas fa-trophy" style="font-size: 1.5rem;"></i>
+                                    </div>
+                                    <div>
+                                        <h3 style="font-weight: 600; margin-bottom: 0.25rem;">Sistema de Conquistas</h3>
+                                        <p style="opacity: 0.9;">Motivação através de metas e reconhecimento</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Register Form -->
+                <div v-if="showRegister" class="card" style="max-width: 800px; margin: 2rem auto;">
+                    <div class="card-header">
+                        <h2 class="card-title">Criar Nova Conta</h2>
+                        <button class="btn btn-outline" @click="showRegister = false">
+                            <i class="fas fa-arrow-left"></i>
+                            Voltar
+                        </button>
+                    </div>
+                    
+                    <div class="grid grid-2">
+                        <div>
+                            <h3 style="margin-bottom: 1rem; color: var(--text-primary);">Informações da Conta</h3>
+                            <div class="form-group">
+                                <label class="form-label">Tipo de Conta</label>
+                                <select class="form-input" v-model="registerForm.role" :disabled="loadingRegister">
+                                    <option value="student">Aluno</option>
+                                    <option value="teacher">Professor</option>
+                                </select>
+                                <small style="color: var(--text-muted); display: block; margin-top: 0.5rem;">
+                                    <span v-if="registerForm.role === 'teacher'">
+                                        <i class="fas fa-info-circle"></i> Contas de professor precisam ser aprovadas por um administrador.
+                                    </span>
+                                    <span v-else>
+                                        <i class="fas fa-info-circle"></i> Alunos podem se associar a um professor opcionalmente.
+                                    </span>
+                                </small>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Usuário</label>
+                                <input type="text" class="form-input" v-model="registerForm.username" 
+                                       placeholder="Escolha um usuário" :disabled="loadingRegister">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Email</label>
+                                <input type="email" class="form-input" v-model="registerForm.email" 
+                                       placeholder="Seu melhor email" :disabled="loadingRegister">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Senha</label>
+                                <input type="password" class="form-input" v-model="registerForm.password" 
+                                       placeholder="Mínimo 8 caracteres" :disabled="loadingRegister">
+                            </div>
+                            <div class="form-group" v-if="registerForm.role === 'student'">
+                                <label class="form-label">ID do Professor (Opcional)</label>
+                                <input type="text" class="form-input" v-model="registerForm.teacher_id" 
+                                       placeholder="ID do seu professor" :disabled="loadingRegister">
+                                <small style="color: var(--text-muted); display: block; margin-top: 0.5rem;">
+                                    Se você tem um professor no sistema, peça o ID dele para se associar.
+                                </small>
+                            </div>
+                        </div>
+                        
+                        <div>
+                            <h3 style="margin-bottom: 1rem; color: var(--text-primary);">Perfil de Aprendizado</h3>
+                            <div class="form-group">
+                                <label class="form-label">Nome Completo</label>
+                                <input type="text" class="form-input" v-model="registerForm.full_name" 
+                                       placeholder="Seu nome completo" :disabled="loadingRegister">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Idade</label>
+                                <input type="number" class="form-input" v-model="registerForm.age" 
+                                       placeholder="Sua idade" :disabled="loadingRegister">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Estilo de Aprendizado</label>
+                                <select class="form-input" v-model="registerForm.preferred_learning_style" :disabled="loadingRegister">
+                                    <option value="visual">Visual</option>
+                                    <option value="auditivo">Auditivo</option>
+                                    <option value="cinestésico">Cinestésico</option>
+                                    <option value="leitura">Leitura/Escrita</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label class="form-label">Interesses de Estudo</label>
+                        <textarea class="form-input" v-model="registerForm.interests" 
+                                  placeholder="Ex: Matemática, Programação, História..." 
+                                  :disabled="loadingRegister" style="min-height: 80px;"></textarea>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label class="form-label">Metas de Aprendizado</label>
+                        <textarea class="form-input" v-model="registerForm.learning_goals" 
+                                  placeholder="Ex: Aprender Python, Melhorar em Cálculo..." 
+                                  :disabled="loadingRegister" style="min-height: 80px;"></textarea>
+                    </div>
+                    
+                    <button class="btn btn-success" style="width: 100%;" @click="register" :disabled="loadingRegister">
+                        <span class="loading" v-if="loadingRegister"></span>
+                        <i class="fas fa-check" v-else></i>
+                        {{ loadingRegister ? 'Criando Conta...' : 'Criar Minha Conta' }}
+                    </button>
+
+                    <!-- Informação sobre o primeiro usuário -->
+                    <div class="card" style="background: rgba(245, 158, 11, 0.1); border-color: var(--warning); margin-top: 1.5rem;">
+                        <div style="padding: 1rem;">
+                            <h4 style="color: var(--warning); margin-bottom: 0.5rem;">
+                                <i class="fas fa-info-circle"></i> Informação Importante
+                            </h4>
+                            <p style="color: var(--text-muted); margin: 0;">
+                                O <strong>primeiro usuário</strong> criado no sistema será automaticamente configurado como <strong>Administrador</strong>.
+                                Administradores têm acesso a ferramentas especiais para gerenciar o sistema.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Authenticated Screens -->
+            <div v-if="isAuthenticated">
+                <!-- Dashboard -->
+                <div v-if="currentView === 'dashboard'" class="grid">
+                    <!-- Stats Overview -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h2 class="card-title">Visão Geral</h2>
+                            <div class="achievement-badge">
+                                <i class="fas fa-user-graduate"></i>
+                                {{ userStats.current_level || 'Iniciante' }}
+                            </div>
+                        </div>
+                        
+                        <div class="stats-grid">
+                            <div class="stat-card">
+                                <div class="stat-value">{{ userStats.session_stats?.total_sessions || 0 }}</div>
+                                <div class="stat-label">Sessões de Estudo</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-value">{{ Math.round(userStats.assessment_stats?.avg_assessment_score || 0) }}%</div>
+                                <div class="stat-label">Nota Média</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-value">{{ userStats.achievement_stats?.total_achievements || 0 }}</div>
+                                <div class="stat-label">Conquistas</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-value">{{ userStats.certificate_stats?.total_certificates || 0 }}</div>
+                                <div class="stat-label">Certificados</div>
+                            </div>
+                        </div>
+
+                        <!-- Teacher ID Display -->
+                        <div v-if="user.role === 'teacher' || user.role === 'admin'" class="card" style="margin-top: 2rem; background: rgba(99, 102, 241, 0.05);">
+                            <div class="card-header">
+                                <h3 class="card-title">Seu ID de Professor</h3>
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;">
+                                <div class="teacher-id-badge" @click="copyTeacherId">
+                                    {{ user.id }}
+                                    <i class="fas fa-copy" style="margin-left: 0.5rem;"></i>
+                                </div>
+                                <p style="color: var(--text-muted); margin: 0;">
+                                    Compartilhe este ID com seus alunos para que eles possam se associar à sua conta.
+                                </p>
+                            </div>
+                        </div>
+
+                        <!-- Teacher Info for Students -->
+                        <div v-if="user.role === 'student' && user.teacher_id" class="card" style="margin-top: 2rem; background: rgba(16, 185, 129, 0.05);">
+                            <div class="card-header">
+                                <h3 class="card-title">Seu Professor</h3>
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 1rem;">
+                                <i class="fas fa-chalkboard-teacher" style="font-size: 2rem; color: var(--success);"></i>
+                                <div>
+                                    <p style="color: var(--text-primary); font-weight: 600; margin: 0;">
+                                        ID do Professor: {{ user.teacher_id }}
+                                    </p>
+                                    <p style="color: var(--text-muted); margin: 0;">
+                                        Você está associado a um professor que pode acompanhar seu progresso.
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Recent Activity & Themes -->
+                    <div class="grid grid-2">
+                        <!-- Recent Activity -->
+                        <div class="card">
+                            <div class="card-header">
+                                <h3 class="card-title">Atividade Recente</h3>
+                                <button class="btn btn-outline" @click="changeView('history')">
+                                    <i class="fas fa-history"></i>
+                                    Ver Tudo
+                                </button>
+                            </div>
+                            
+                            <div v-if="recentActivities.length === 0" class="empty-state">
+                                <i class="fas fa-inbox empty-state-icon"></i>
+                                <p>Nenhuma atividade recente</p>
+                                <button class="btn btn-primary" style="margin-top: 1rem;" @click="changeView('themes')">
+                                    <i class="fas fa-plus"></i>
+                                    Começar a Estudar
+                                </button>
+                            </div>
+                            
+                            <div v-else>
+                                <div v-for="activity in recentActivities.slice(0, 3)" :key="activity.id" 
+                                     class="topic-card" style="margin-bottom: 1rem;">
+                                    <div style="display: flex; justify-content: between; align-items: start;">
+                                        <div>
+                                            <h4 style="margin-bottom: 0.5rem; color: var(--text-primary);">
+                                                {{ activity.topic_name || activity.theme_name }}
+                                            </h4>
+                                            <p style="color: var(--text-muted); font-size: 0.875rem;">
+                                                {{ activity.session_type || activity.assessment_type }} • 
+                                                {{ Math.round((activity.time_spent || 0) / 60) }} min
+                                            </p>
+                                        </div>
+                                        <div class="achievement-badge" 
+                                             :style="{ background: activity.score >= 70 ? 'var(--gradient-success)' : 'var(--gradient-warning)' }">
+                                            {{ activity.score || 0 }}%
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- My Themes -->
+                        <div class="card">
+                            <div class="card-header">
+                                <h3 class="card-title">Meus Temas</h3>
+                                <button class="btn btn-primary" @click="changeView('themes')">
+                                    <i class="fas fa-plus"></i>
+                                    Novo Tema
+                                </button>
+                            </div>
+                            
+                            <div v-if="themes.length === 0" class="empty-state">
+                                <i class="fas fa-book-open empty-state-icon"></i>
+                                <p>Nenhum tema criado</p>
+                                <button class="btn btn-primary" style="margin-top: 1rem;" @click="changeView('themes')">
+                                    <i class="fas fa-plus"></i>
+                                    Criar Primeiro Tema
+                                </button>
+                            </div>
+                            
+                            <div v-else class="grid" style="grid-template-columns: 1fr; gap: 1rem;">
+                                <div v-for="theme in themes.slice(0, 3)" :key="theme.id" 
+                                     class="topic-card" @click="selectTheme(theme)">
+                                    <h4 style="margin-bottom: 0.5rem; color: var(--text-primary);">
+                                        {{ theme.theme_name }}
+                                    </h4>
+                                    <p style="color: var(--text-muted); font-size: 0.875rem; margin-bottom: 1rem;">
+                                        {{ theme.description || 'Sem descrição' }}
+                                    </p>
+                                    <div style="display: flex; justify-content: between; align-items: center;">
+                                        <span style="color: var(--text-muted); font-size: 0.75rem;">
+                                            {{ formatDate(theme.created_at) }}
+                                        </span>
+                                        <i class="fas fa-arrow-right" style="color: var(--primary);"></i>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Themes Management -->
+                <div v-if="currentView === 'themes'" class="grid">
+                    <div class="card">
+                        <div class="card-header">
+                            <h2 class="card-title">Meus Temas de Estudo</h2>
+                            <button class="btn btn-primary" @click="showCreateTheme = true">
+                                <i class="fas fa-plus"></i>
+                                Novo Tema
+                            </button>
+                        </div>
+
+                        <!-- Create Theme Form -->
+                        <div v-if="showCreateTheme" class="card" style="background: rgba(99, 102, 241, 0.05); border-color: var(--primary); margin-bottom: 2rem;">
+                            <div class="card-header">
+                                <h3 class="card-title">Criar Novo Tema</h3>
+                                <button class="btn btn-outline" @click="showCreateTheme = false">
+                                    <i class="fas fa-times"></i>
+                                    Cancelar
+                                </button>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label class="form-label">Nome do Tema</label>
+                                <input type="text" class="form-input" v-model="newTheme.theme_name" 
+                                       placeholder="Ex: Programação Python, Cálculo I..." :disabled="loadingTheme">
+                            </div>
+                            
+                            <div class="form-group">
+                                <label class="form-label">Descrição (Opcional)</label>
+                                <textarea class="form-input" v-model="newTheme.description" 
+                                          placeholder="Descreva brevemente o tema..." :disabled="loadingTheme"
+                                          style="min-height: 100px;"></textarea>
+                            </div>
+                            
+                            <button class="btn btn-success" @click="createTheme" 
+                                    :disabled="!newTheme.theme_name || loadingTheme">
+                                <span class="loading" v-if="loadingTheme"></span>
+                                <i class="fas fa-check" v-else></i>
+                                {{ loadingTheme ? 'Criando...' : 'Criar Tema' }}
+                            </button>
+                        </div>
+
+                        <!-- Themes Grid -->
+                        <div v-if="themes.length === 0 && !showCreateTheme" class="empty-state">
+                            <i class="fas fa-book-open empty-state-icon"></i>
+                            <p>Nenhum tema criado ainda</p>
+                            <button class="btn btn-primary" style="margin-top: 1rem;" @click="showCreateTheme = true">
+                                <i class="fas fa-plus"></i>
+                                Criar Primeiro Tema
+                            </button>
+                        </div>
+                        
+                        <div v-else class="grid grid-3">
+                            <div v-for="theme in themes" :key="theme.id" 
+                                 class="topic-card" @click="selectTheme(theme)">
+                                <div style="display: flex; justify-content: between; align-items: start; margin-bottom: 1rem;">
+                                    <h4 style="color: var(--text-primary); flex: 1;">{{ theme.theme_name }}</h4>
+                                    <div style="display: flex; gap: 0.5rem;">
+                                        <button class="btn btn-danger btn-sm" @click.stop="deleteTheme(theme.id)" style="padding: 0.25rem 0.5rem;">
+                                            <i class="fas fa-trash"></i>
+                                        </button>
+                                        <i class="fas fa-arrow-right" style="color: var(--primary); margin-left: 0.5rem;"></i>
+                                    </div>
+                                </div>
+                                
+                                <p style="color: var(--text-muted); font-size: 0.875rem; margin-bottom: 1rem;">
+                                    {{ theme.description || 'Sem descrição' }}
+                                </p>
+
+                                <div v-if="theme.tag" style="margin-bottom: 1rem;">
+                                    <span class="topic-status" style="background: rgba(99, 102, 241, 0.2); color: var(--primary);">
+                                        {{ theme.tag }}
+                                    </span>
+                                </div>
+                                
+                                <div style="display: flex; justify-content: between; align-items: center;">
+                                    <span style="color: var(--text-muted); font-size: 0.75rem;">
+                                        {{ formatDate(theme.created_at) }}
+                                    </span>
+                                    <div class="achievement-badge" style="background: var(--gradient-primary);">
+                                        <i class="fas fa-play"></i>
+                                        Estudar
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Study Interface -->
+                <div v-if="currentView === 'study' && selectedTheme" class="grid">
+                    <div class="card">
+                        <div class="card-header">
+                            <div>
+                                <h2 class="card-title">{{ selectedTheme.theme_name }}</h2>
+                                <p style="color: var(--text-muted); margin-top: 0.25rem;">
+                                    {{ selectedTheme.description }}
+                                </p>
+                                <div v-if="selectedTheme.tag" style="margin-top: 0.5rem;">
+                                    <span class="topic-status" style="background: rgba(99, 102, 241, 0.2); color: var(--primary);">
+                                        {{ selectedTheme.tag }}
+                                    </span>
+                                </div>
+                            </div>
+                            <button class="btn btn-outline" @click="changeView('themes')">
+                                <i class="fas fa-arrow-left"></i>
+                                Voltar aos Temas
+                            </button>
+                        </div>
+
+                        <!-- Current Topic -->
+                        <div v-if="themeProgress.current_topic" class="card" style="background: rgba(245, 158, 11, 0.05); border-color: var(--warning); margin-bottom: 2rem;">
+                            <div class="card-header">
+                                <div>
+                                    <h3 class="card-title">{{ themeProgress.current_topic.topic_name }}</h3>
+                                    <p style="color: var(--text-muted); margin-top: 0.25rem;">
+                                        {{ themeProgress.current_topic.topic_description }}
+                                    </p>
+                                </div>
+                                <span class="topic-status" :class="'status-' + themeProgress.current_topic.status">
+                                    {{ themeProgress.current_topic.status === 'pending' ? 'Não Iniciado' : 
+                                       themeProgress.current_topic.status === 'in_progress' ? 'Em Progresso' : 'Concluído' }}
+                                </span>
+                            </div>
+
+                            <!-- Progress -->
+                            <div class="progress-container">
+                                <div class="progress-header">
+                                    <span style="color: var(--text-primary); font-weight: 600;">Progresso do Tópico</span>
+                                    <span style="color: var(--text-muted);">{{ themeProgress.current_topic.progress }}%</span>
+                                </div>
+                                <div class="progress-bar">
+                                    <div class="progress-fill" :style="{ width: themeProgress.current_topic.progress + '%' }"></div>
+                                </div>
+                                
+                                <div class="progress-milestones">
+                                    <div class="milestone" :class="{ completed: themeProgress.current_topic.progress >= 10, active: themeProgress.current_topic.progress < 10 }">
+                                        <div class="milestone-dot"></div>
+                                        <span class="milestone-label">Lição</span>
+                                    </div>
+                                    <div class="milestone" :class="{ completed: themeProgress.current_topic.progress >= 40, active: themeProgress.current_topic.progress >= 10 && themeProgress.current_topic.progress < 40 }">
+                                        <div class="milestone-dot"></div>
+                                        <span class="milestone-label">3 Simulados</span>
+                                    </div>
+                                    <div class="milestone" :class="{ completed: themeProgress.current_topic.progress >= 100, active: themeProgress.current_topic.progress >= 40 && themeProgress.current_topic.progress < 100 }">
+                                        <div class="milestone-dot"></div>
+                                        <span class="milestone-label">Prova</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Action Buttons -->
+                            <div style="display: flex; gap: 1rem; flex-wrap: wrap; margin-top: 1.5rem;">
+                                <button @click="generateLesson" class="btn btn-primary" :disabled="loadingLesson">
+                                    <span class="loading" v-if="loadingLesson"></span>
+                                    <i class="fas fa-book" v-else></i>
+                                    {{ loadingLesson ? 'Gerando...' : 'Gerar Lição' }}
+                                </button>
+                                
+                                <button @click="generateQuiz" class="btn btn-warning" 
+                                        :disabled="loadingQuiz || !themeProgress.current_topic.quiz_available">
+                                    <span class="loading" v-if="loadingQuiz"></span>
+                                    <i class="fas fa-question-circle" v-else></i>
+                                    {{ loadingQuiz ? 'Gerando...' : 'Simulado (5 questões)' }}
+                                </button>
+                                
+                                <button @click="generateExam" class="btn btn-danger" 
+                                        :disabled="loadingExam || !themeProgress.current_topic.exam_available">
+                                    <span class="loading" v-if="loadingExam"></span>
+                                    <i class="fas fa-file-alt" v-else></i>
+                                    {{ loadingExam ? 'Gerando...' : 'Prova (10 questões)' }}
+                                </button>
+                            </div>
+
+                            <!-- Availability Messages -->
+                            <div v-if="!themeProgress.current_topic.quiz_available" style="margin-top: 1rem;">
+                                <div class="example-box" style="background: rgba(245, 158, 11, 0.1); border-color: var(--warning);">
+                                    <i class="fas fa-info-circle" style="color: var(--warning);"></i>
+                                    Complete pelo menos uma lição antes de fazer um simulado.
+                                </div>
+                            </div>
+                            
+                            <div v-if="!themeProgress.current_topic.exam_available && themeProgress.current_topic.quiz_available" style="margin-top: 1rem;">
+                                <div class="example-box" style="background: rgba(245, 158, 11, 0.1); border-color: var(--warning);">
+                                    <i class="fas fa-info-circle" style="color: var(--warning);"></i>
+                                    Complete 3 simulados com nota mínima de 50% antes de fazer a prova.
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- All Topics Progress -->
+                        <div class="card">
+                            <div class="card-header">
+                                <h3 class="card-title">Progresso do Tema</h3>
+                            </div>
+                            
+                            <div v-if="themeProgress.topics.length === 0" class="empty-state">
+                                <i class="fas fa-spinner fa-spin empty-state-icon"></i>
+                                <p>Carregando progresso...</p>
+                            </div>
+                            
+                            <div v-else class="grid" style="grid-template-columns: 1fr; gap: 1rem;">
+                                <div v-for="topic in themeProgress.topics" :key="topic.id" 
+                                     class="topic-card" :class="{ active: themeProgress.current_topic && topic.id === themeProgress.current_topic.id }">
+                                    <div style="display: flex; justify-content: between; align-items: start; margin-bottom: 1rem;">
+                                        <div style="flex: 1;">
+                                            <h4 style="color: var(--text-primary); margin-bottom: 0.5rem;">{{ topic.topic_name }}</h4>
+                                            <p style="color: var(--text-muted); font-size: 0.875rem;">{{ topic.topic_description }}</p>
+                                        </div>
+                                        <div style="text-align: right;">
+                                            <span class="topic-status" :class="'status-' + topic.status" style="margin-bottom: 0.5rem; display: block;">
+                                                {{ topic.status === 'pending' ? 'Não Iniciado' : 
+                                                   topic.status === 'in_progress' ? 'Em Progresso' : 'Concluído' }}
+                                            </span>
+                                            <span style="color: var(--text-muted); font-size: 0.875rem;">
+                                                {{ topic.progress }}%
+                                            </span>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="progress-bar">
+                                        <div class="progress-fill" :style="{ width: topic.progress + '%' }"></div>
+                                    </div>
+                                    
+                                    <div style="display: flex; justify-content: between; margin-top: 0.5rem;">
+                                        <small style="color: var(--text-muted);">
+                                            Lições: {{ topic.lessons_completed }} | 
+                                            Simulados: {{ topic.quizzes_completed }} | 
+                                            Provas: {{ topic.exams_completed }}
+                                        </small>
+                                        <small style="color: var(--text-muted);">
+                                            Dificuldade: {{ topic.difficulty }}
+                                        </small>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Certificates View -->
+                <div v-if="currentView === 'certificates'" class="grid">
+                    <div class="card">
+                        <div class="card-header">
+                            <h2 class="card-title">Meus Certificados</h2>
+                            <div style="display: flex; gap: 1rem;">
+                                <button class="btn btn-outline" @click="showCertificateVerification = true">
+                                    <i class="fas fa-search"></i>
+                                    Verificar Certificado
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Certificate Verification -->
+                        <div v-if="showCertificateVerification" class="card" style="background: rgba(59, 130, 246, 0.05); border-color: var(--primary); margin-bottom: 2rem;">
+                            <div class="card-header">
+                                <h3 class="card-title">Verificar Certificado</h3>
+                                <button class="btn btn-outline" @click="showCertificateVerification = false">
+                                    <i class="fas fa-times"></i>
+                                    Fechar
+                                </button>
+                            </div>
+                            
+                            <div class="grid grid-2">
+                                <div>
+                                    <h4 style="margin-bottom: 1rem; color: var(--text-primary);">Verificar por Código</h4>
+                                    <div class="form-group">
+                                        <label class="form-label">Código do Certificado</label>
+                                        <input type="text" class="form-input" v-model="verificationCode" 
+                                               placeholder="00000000-0000-0000" :disabled="loadingVerification">
+                                    </div>
+                                    <button class="btn btn-primary" @click="verifyCertificate" :disabled="!verificationCode || loadingVerification">
+                                        <span class="loading" v-if="loadingVerification"></span>
+                                        <i class="fas fa-search" v-else></i>
+                                        {{ loadingVerification ? 'Verificando...' : 'Verificar Código' }}
+                                    </button>
+                                </div>
+                                
+                                <div>
+                                    <h4 style="margin-bottom: 1rem; color: var(--text-primary);">Verificar por Upload</h4>
+                                    <div class="form-group">
+                                        <label class="form-label">Arquivo do Certificado (PDF)</label>
+                                        <input type="file" class="form-input" @change="handleFileUpload" 
+                                               accept=".pdf" :disabled="loadingVerification">
+                                    </div>
+                                    <button class="btn btn-primary" @click="verifyCertificateUpload" :disabled="!verificationFile || loadingVerification">
+                                        <span class="loading" v-if="loadingVerification"></span>
+                                        <i class="fas fa-upload" v-else></i>
+                                        {{ loadingVerification ? 'Verificando...' : 'Verificar Arquivo' }}
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- Verification Result -->
+                            <div v-if="verificationResult" class="verification-result" 
+                                 :class="verificationResult.valid ? 'verification-valid' : 'verification-invalid'">
+                                <i :class="verificationResult.valid ? 'fas fa-check-circle' : 'fas fa-times-circle'" 
+                                   style="font-size: 3rem; margin-bottom: 1rem;"
+                                   :style="{ color: verificationResult.valid ? 'var(--success)' : 'var(--danger)' }"></i>
+                                <h3 style="margin-bottom: 1rem;">
+                                    {{ verificationResult.valid ? 'Certificado Válido' : 'Certificado Inválido' }}
+                                </h3>
+                                <div v-if="verificationResult.valid && verificationResult.certificate">
+                                    <p><strong>Nome:</strong> {{ verificationResult.certificate.full_name }}</p>
+                                    <p><strong>Tema:</strong> {{ verificationResult.certificate.theme_name }}</p>
+                                    <p><strong>Tag:</strong> {{ verificationResult.certificate.tag }}</p>
+                                    <p><strong>Data de Emissão:</strong> {{ formatDate(verificationResult.certificate.issue_date) }}</p>
+                                    <p><strong>Código:</strong> {{ verificationResult.certificate.certificate_code }}</p>
+                                </div>
+                                <p v-else>{{ verificationResult.error }}</p>
+                            </div>
+                        </div>
+
+                        <!-- My Certificates -->
+                        <div v-if="certificates.length === 0" class="empty-state">
+                            <i class="fas fa-award empty-state-icon"></i>
+                            <p>Nenhum certificado conquistado</p>
+                            <p style="color: var(--text-muted); margin-top: 0.5rem;">
+                                Complete temas para receber certificados!
+                            </p>
+                        </div>
+                        
+                        <div v-else class="grid grid-2">
+                            <div v-for="certificate in certificates" :key="certificate.id" class="certificate-card">
+                                <i class="fas fa-award" style="font-size: 3rem; color: var(--warning); margin-bottom: 1rem;"></i>
+                                <h3 style="margin-bottom: 1rem; color: var(--text-primary);">Certificado de Conclusão</h3>
+                                <p style="font-size: 1.25rem; margin-bottom: 0.5rem; font-weight: 600;">
+                                    {{ certificate.full_name }}
+                                </p>
+                                <p style="color: var(--text-muted); margin-bottom: 1rem;">
+                                    Concluiu com sucesso o tema
+                                </p>
+                                <h4 style="margin-bottom: 0.5rem; color: var(--primary);">
+                                    {{ certificate.theme_name }}
+                                </h4>
+                                <div style="margin-bottom: 1rem;">
+                                    <span class="topic-status" style="background: rgba(245, 158, 11, 0.2); color: var(--warning);">
+                                        {{ certificate.tag }}
+                                    </span>
+                                </div>
+                                <p style="color: var(--text-muted); font-size: 0.875rem; margin-bottom: 1rem;">
+                                    Emitido em: {{ formatDate(certificate.issue_date) }}
+                                </p>
+                                <div class="teacher-id-badge" style="background: var(--gradient-warning);">
+                                    {{ certificate.certificate_code }}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Forum View -->
+                <div v-if="currentView === 'forum'" class="grid">
+                    <div class="card">
+                        <div class="card-header">
+                            <h2 class="card-title">Fórum de Discussão</h2>
+                            <button class="btn btn-primary" @click="showCreatePost = true" v-if="user.role !== 'student' || hasCertificates">
+                                <i class="fas fa-plus"></i>
+                                Novo Post
+                            </button>
+                        </div>
+
+                        <!-- Create Post Modal -->
+                        <div v-if="showCreatePost" class="modal-overlay" @click="showCreatePost = false">
+                            <div class="modal-content" @click.stop style="max-width: 600px;">
+                                <div class="modal-header">
+                                    <h3 class="card-title">Criar Novo Post</h3>
+                                    <button class="btn btn-outline" @click="showCreatePost = false">
+                                        <i class="fas fa-times"></i>
+                                        Cancelar
+                                    </button>
+                                </div>
+                                <div class="modal-body">
+                                    <div class="form-group">
+                                        <label class="form-label">Categoria</label>
+                                        <select class="form-input" v-model="newPost.category_id" :disabled="loadingPost">
+                                            <option v-for="category in forumCategories" :key="category.id" :value="category.id">
+                                                {{ category.name }}
+                                            </option>
+                                        </select>
+                                    </div>
+                                    <div class="form-group">
+                                        <label class="form-label">Título</label>
+                                        <input type="text" class="form-input" v-model="newPost.title" 
+                                               placeholder="Título do post" :disabled="loadingPost">
+                                    </div>
+                                    <div class="form-group">
+                                        <label class="form-label">Conteúdo</label>
+                                        <textarea class="form-input" v-model="newPost.content" 
+                                                  placeholder="Escreva seu post aqui..." :disabled="loadingPost"
+                                                  style="min-height: 200px;"></textarea>
+                                    </div>
+                                    <button class="btn btn-success" @click="createPost" 
+                                            :disabled="!newPost.category_id || !newPost.title || !newPost.content || loadingPost">
+                                        <span class="loading" v-if="loadingPost"></span>
+                                        <i class="fas fa-check" v-else></i>
+                                        {{ loadingPost ? 'Criando...' : 'Criar Post' }}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Forum Categories -->
+                        <div v-if="!selectedForumCategory" class="grid">
+                            <div v-for="category in forumCategories" :key="category.id" 
+                                 class="forum-category" @click="selectForumCategory(category)">
+                                <div style="display: flex; justify-content: between; align-items: start;">
+                                    <div>
+                                        <h3 style="margin-bottom: 0.5rem; color: var(--text-primary);">
+                                            {{ category.name }}
+                                        </h3>
+                                        <p style="color: var(--text-muted); margin-bottom: 1rem;">
+                                            {{ category.description }}
+                                        </p>
+                                    </div>
+                                    <i class="fas fa-arrow-right" style="color: var(--primary);"></i>
+                                </div>
+                                <div style="display: flex; gap: 1rem;">
+                                    <small style="color: var(--text-muted);">
+                                        <i class="fas fa-comment"></i> {{ category.post_count || 0 }} posts
+                                    </small>
+                                    <small style="color: var(--text-muted);">
+                                        <i class="fas fa-reply"></i> {{ category.reply_count || 0 }} respostas
+                                    </small>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Forum Posts -->
+                        <div v-if="selectedForumCategory && !selectedForumPost">
+                            <div class="card-header">
+                                <div>
+                                    <h3 class="card-title">{{ selectedForumCategory.name }}</h3>
+                                    <p style="color: var(--text-muted); margin-top: 0.25rem;">
+                                        {{ selectedForumCategory.description }}
+                                    </p>
+                                </div>
+                                <button class="btn btn-outline" @click="selectedForumCategory = null">
+                                    <i class="fas fa-arrow-left"></i>
+                                    Voltar
+                                </button>
+                            </div>
+
+                            <div v-if="forumPosts.length === 0" class="empty-state">
+                                <i class="fas fa-comments empty-state-icon"></i>
+                                <p>Nenhum post nesta categoria</p>
+                                <button class="btn btn-primary" style="margin-top: 1rem;" @click="showCreatePost = true">
+                                    <i class="fas fa-plus"></i>
+                                    Criar Primeiro Post
+                                </button>
+                            </div>
+
+                            <div v-else>
+                                <div v-for="post in forumPosts" :key="post.id" 
+                                     class="forum-post" :class="{ pinned: post.is_pinned }"
+                                     @click="selectForumPost(post)">
+                                    <div style="display: flex; justify-content: between; align-items: start;">
+                                        <div style="flex: 1;">
+                                            <h4 style="margin-bottom: 0.5rem; color: var(--text-primary);">
+                                                {{ post.title }}
+                                                <span v-if="post.is_pinned" class="topic-status" style="background: rgba(245, 158, 11, 0.2); color: var(--warning); margin-left: 0.5rem;">
+                                                    Fixado
+                                                </span>
+                                            </h4>
+                                            <p style="color: var(--text-muted); font-size: 0.875rem;">
+                                                Por {{ post.full_name }} • {{ formatDate(post.created_at) }}
+                                            </p>
+                                        </div>
+                                        <div style="text-align: right;">
+                                            <div style="display: flex; gap: 1rem; margin-bottom: 0.5rem;">
+                                                <small style="color: var(--text-muted);">
+                                                    <i class="fas fa-eye"></i> {{ post.view_count }}
+                                                </small>
+                                                <small style="color: var(--text-muted);">
+                                                    <i class="fas fa-reply"></i> {{ post.reply_count }}
+                                                </small>
+                                            </div>
+                                            <small style="color: var(--text-muted);">
+                                                {{ formatDate(post.last_activity) }}
+                                            </small>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Single Post View -->
+                        <div v-if="selectedForumPost">
+                            <div class="card-header">
+                                <div>
+                                    <h3 class="card-title">{{ selectedForumPost.title }}</h3>
+                                    <p style="color: var(--text-muted); margin-top: 0.25rem;">
+                                        Por {{ selectedForumPost.full_name }} • {{ formatDate(selectedForumPost.created_at) }}
+                                    </p>
+                                </div>
+                                <button class="btn btn-outline" @click="selectedForumPost = null">
+                                    <i class="fas fa-arrow-left"></i>
+                                    Voltar
+                                </button>
+                            </div>
+
+                            <!-- Original Post -->
+                            <div class="forum-post" style="cursor: default;">
+                                <div style="display: flex; justify-content: between; align-items: start; margin-bottom: 1rem;">
+                                    <div>
+                                        <h4 style="margin-bottom: 0.5rem; color: var(--text-primary);">
+                                            {{ selectedForumPost.full_name }}
+                                        </h4>
+                                        <p style="color: var(--text-muted); font-size: 0.875rem;">
+                                            {{ formatDate(selectedForumPost.created_at) }}
+                                        </p>
+                                    </div>
+                                    <div class="role-badge" :class="'role-' + (selectedForumPost.role || 'student')">
+                                        {{ selectedForumPost.role === 'student' ? 'Aluno' : selectedForumPost.role === 'teacher' ? 'Professor' : 'Administrador' }}
+                                    </div>
+                                </div>
+                                <div class="lesson-content" v-html="formatContent(selectedForumPost.content)"></div>
+                            </div>
+
+                            <!-- Replies -->
+                            <div style="margin-top: 2rem;">
+                                <h4 style="margin-bottom: 1rem; color: var(--text-primary);">
+                                    Respostas ({{ forumReplies.length }})
+                                </h4>
+
+                                <div v-if="forumReplies.length === 0" class="empty-state" style="padding: 2rem;">
+                                    <i class="fas fa-comment-slash empty-state-icon"></i>
+                                    <p>Nenhuma resposta ainda</p>
+                                </div>
+
+                                <div v-else>
+                                    <div v-for="reply in forumReplies" :key="reply.id" 
+                                         class="forum-reply" :class="{ solution: reply.is_solution }">
+                                        <div style="display: flex; justify-content: between; align-items: start; margin-bottom: 1rem;">
+                                            <div>
+                                                <h5 style="margin-bottom: 0.25rem; color: var(--text-primary);">
+                                                    {{ reply.full_name }}
+                                                </h5>
+                                                <p style="color: var(--text-muted); font-size: 0.875rem;">
+                                                    {{ formatDate(reply.created_at) }}
+                                                </p>
+                                            </div>
+                                            <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                                <div class="role-badge" :class="'role-' + (reply.role || 'student')">
+                                                    {{ reply.role === 'student' ? 'Aluno' : reply.role === 'teacher' ? 'Professor' : 'Administrador' }}
+                                                </div>
+                                                <span v-if="reply.is_solution" class="topic-status" style="background: rgba(16, 185, 129, 0.2); color: var(--success);">
+                                                    Solução
+                                                </span>
+                                            </div>
+                                        </div>
+                                        <div class="lesson-content" v-html="formatContent(reply.content)"></div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Reply Form -->
+                            <div class="card" style="margin-top: 2rem;">
+                                <div class="card-header">
+                                    <h4 class="card-title">Responder</h4>
+                                </div>
+                                <div class="form-group">
+                                    <textarea class="form-input" v-model="newReply.content" 
+                                              placeholder="Escreva sua resposta..." :disabled="loadingReply"
+                                              style="min-height: 120px;"></textarea>
+                                </div>
+                                <button class="btn btn-primary" @click="createReply" 
+                                        :disabled="!newReply.content || loadingReply">
+                                    <span class="loading" v-if="loadingReply"></span>
+                                    <i class="fas fa-reply" v-else></i>
+                                    {{ loadingReply ? 'Enviando...' : 'Enviar Resposta' }}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Teacher Panel -->
+                <div v-if="currentView === 'teacher' && (user.role === 'teacher' || user.role === 'admin')" class="grid">
+                    <div class="card">
+                        <div class="card-header">
+                            <h2 class="card-title">Painel do Professor</h2>
+                            <div class="teacher-id-badge" @click="copyTeacherId">
+                                {{ user.id }}
+                                <i class="fas fa-copy" style="margin-left: 0.5rem;"></i>
+                            </div>
+                        </div>
+
+                        <!-- Students List -->
+                        <div class="card">
+                            <div class="card-header">
+                                <h3 class="card-title">Meus Alunos</h3>
+                            </div>
+
+                            <div v-if="teacherStudents.length === 0" class="empty-state">
+                                <i class="fas fa-users empty-state-icon"></i>
+                                <p>Nenhum aluno associado</p>
+                                <p style="color: var(--text-muted); margin-top: 0.5rem;">
+                                    Compartilhe seu ID com os alunos para que eles possam se associar à sua conta.
+                                </p>
+                            </div>
+
+                            <div v-else class="grid grid-3">
+                                <div v-for="student in teacherStudents" :key="student.id" 
+                                     class="student-card" @click="viewStudentProgress(student)">
+                                    <div style="display: flex; justify-content: between; align-items: start; margin-bottom: 1rem;">
+                                        <div>
+                                            <h4 style="margin-bottom: 0.25rem; color: var(--text-primary);">
+                                                {{ student.full_name || student.username }}
+                                            </h4>
+                                            <p style="color: var(--text-muted); font-size: 0.875rem;">
+                                                {{ student.username }}
+                                            </p>
+                                        </div>
+                                        <div class="role-badge role-student">
+                                            Aluno
+                                        </div>
+                                    </div>
+                                    
+                                    <div style="display: flex; justify-content: between; margin-bottom: 1rem;">
+                                        <div style="text-align: center;">
+                                            <div class="stat-value" style="font-size: 1.5rem;">{{ student.avg_score ? Math.round(student.avg_score) : 0 }}%</div>
+                                            <div class="stat-label">Nota Média</div>
+                                        </div>
+                                        <div style="text-align: center;">
+                                            <div class="stat-value" style="font-size: 1.5rem;">{{ student.completed_topics || 0 }}</div>
+                                            <div class="stat-label">Tópicos</div>
+                                        </div>
+                                    </div>
+
+                                    <div class="progress-bar">
+                                        <div class="progress-fill" :style="{ width: (student.avg_score || 0) + '%' }"></div>
+                                    </div>
+                                    
+                                    <div style="display: flex; justify-content: between; margin-top: 0.5rem;">
+                                        <small style="color: var(--text-muted);">
+                                            Nível: {{ student.current_level || 'Iniciante' }}
+                                        </small>
+                                        <small style="color: var(--text-muted);">
+                                            <i class="fas fa-arrow-right"></i>
+                                        </small>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Student Progress View -->
+                        <div v-if="selectedStudentProgress" class="card">
+                            <div class="card-header">
+                                <div>
+                                    <h3 class="card-title">Progresso de {{ selectedStudentProgress.student.full_name || selectedStudentProgress.student.username }}</h3>
+                                    <p style="color: var(--text-muted); margin-top: 0.25rem;">
+                                        {{ selectedStudentProgress.student.username }} • {{ selectedStudentProgress.student.email }}
+                                    </p>
+                                </div>
+                                <button class="btn btn-outline" @click="selectedStudentProgress = null">
+                                    <i class="fas fa-arrow-left"></i>
+                                    Voltar
+                                </button>
+                            </div>
+
+                            <!-- Student Themes -->
+                            <div class="card">
+                                <div class="card-header">
+                                    <h4 class="card-title">Temas do Aluno</h4>
+                                </div>
+                                
+                                <div v-if="selectedStudentProgress.themes.length === 0" class="empty-state">
+                                    <i class="fas fa-book-open empty-state-icon"></i>
+                                    <p>Nenhum tema criado</p>
+                                </div>
+                                
+                                <div v-else class="grid" style="grid-template-columns: 1fr; gap: 1rem;">
+                                    <div v-for="theme in selectedStudentProgress.themes" :key="theme.id" class="topic-card">
+                                        <div style="display: flex; justify-content: between; align-items: start;">
+                                            <div style="flex: 1;">
+                                                <h4 style="color: var(--text-primary); margin-bottom: 0.5rem;">{{ theme.theme_name }}</h4>
+                                                <p style="color: var(--text-muted); font-size: 0.875rem;">{{ theme.description }}</p>
+                                            </div>
+                                            <div style="text-align: right;">
+                                                <span class="topic-status" :class="theme.completed_topics === theme.total_topics ? 'status-completed' : 'status-in-progress'" style="margin-bottom: 0.5rem; display: block;">
+                                                    {{ theme.completed_topics === theme.total_topics ? 'Concluído' : 'Em Progresso' }}
+                                                </span>
+                                                <span style="color: var(--text-muted); font-size: 0.875rem;">
+                                                    {{ theme.completed_topics }}/{{ theme.total_topics }} tópicos
+                                                </span>
+                                            </div>
+                                        </div>
+                                        
+                                        <div class="progress-bar">
+                                            <div class="progress-fill" :style="{ width: (theme.completed_topics / theme.total_topics * 100) + '%' }"></div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Recent Assessments -->
+                            <div class="card">
+                                <div class="card-header">
+                                    <h4 class="card-title">Avaliações Recentes</h4>
+                                </div>
+                                
+                                <div v-if="selectedStudentProgress.assessments.length === 0" class="empty-state">
+                                    <i class="fas fa-tasks empty-state-icon"></i>
+                                    <p>Nenhuma avaliação realizada</p>
+                                </div>
+                                
+                                <div v-else class="grid" style="grid-template-columns: 1fr; gap: 1rem;">
+                                    <div v-for="assessment in selectedStudentProgress.assessments" :key="assessment.assessment_id" class="topic-card">
+                                        <div style="display: flex; justify-content: between; align-items: start;">
+                                            <div>
+                                                <h4 style="margin-bottom: 0.5rem; color: var(--text-primary);">
+                                                    {{ assessment.topic_name }} - {{ assessment.theme_name }}
+                                                </h4>
+                                                <p style="color: var(--text-muted); font-size: 0.875rem;">
+                                                    {{ assessment.assessment_type === 'quiz' ? 'Simulado' : 'Prova' }} • 
+                                                    {{ assessment.total_questions }} questões • 
+                                                    {{ Math.round(assessment.time_spent / 60) }} minutos
+                                                </p>
+                                            </div>
+                                            <div style="text-align: right;">
+                                                <div class="achievement-badge" 
+                                                     :style="{ background: assessment.score >= 70 ? 'var(--gradient-success)' : 'var(--gradient-warning)' }">
+                                                    {{ assessment.score }}%
+                                                </div>
+                                                <small style="color: var(--text-muted); display: block; margin-top: 0.5rem;">
+                                                    {{ formatDate(assessment.completed_at) }}
+                                                </small>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Admin Panel -->
+                <div v-if="currentView === 'admin' && user.role === 'admin'" class="grid">
+                    <div class="card">
+                        <div class="card-header">
+                            <h2 class="card-title">Painel de Administração</h2>
+                            <div class="role-badge role-admin">
+                                <i class="fas fa-shield-alt"></i>
+                                Administrador
+                            </div>
+                        </div>
+
+                        <!-- Admin Tools -->
+                        <div class="admin-tools">
+                            <h3 style="margin-bottom: 1rem; color: var(--danger);">Ferramentas de Administração</h3>
+                            <p style="color: var(--text-muted); margin-bottom: 1.5rem;">
+                                Estas ferramentas permitem ações especiais no sistema. Use com responsabilidade.
+                            </p>
+
+                            <div class="grid grid-3">
+                                <!-- Make Teacher -->
+                                <div class="card">
+                                    <div class="card-header">
+                                        <h4 class="card-title">Promover a Professor</h4>
+                                    </div>
+                                    <div class="form-group">
+                                        <label class="form-label">ID do Usuário</label>
+                                        <input type="text" class="form-input" v-model="adminTools.makeTeacher.userId" 
+                                               placeholder="ID do usuário">
+                                    </div>
+                                    <button class="btn btn-warning" @click="makeTeacher" 
+                                            :disabled="!adminTools.makeTeacher.userId || loadingAdminAction">
+                                        <span class="loading" v-if="loadingAdminAction"></span>
+                                        <i class="fas fa-user-graduate" v-else></i>
+                                        {{ loadingAdminAction ? 'Promovendo...' : 'Promover a Professor' }}
+                                    </button>
+                                </div>
+
+                                <!-- Skip Topic -->
+                                <div class="card">
+                                    <div class="card-header">
+                                        <h4 class="card-title">Pular Tópico</h4>
+                                    </div>
+                                    <div class="form-group">
+                                        <label class="form-label">ID do Usuário</label>
+                                        <input type="text" class="form-input" v-model="adminTools.skipTopic.userId" 
+                                               placeholder="ID do usuário">
+                                    </div>
+                                    <div class="form-group">
+                                        <label class="form-label">ID do Tópico</label>
+                                        <input type="text" class="form-input" v-model="adminTools.skipTopic.topicId" 
+                                               placeholder="ID do tópico">
+                                    </div>
+                                    <button class="btn btn-warning" @click="skipTopic" 
+                                            :disabled="!adminTools.skipTopic.userId || !adminTools.skipTopic.topicId || loadingAdminAction">
+                                        <span class="loading" v-if="loadingAdminAction"></span>
+                                        <i class="fas fa-forward" v-else></i>
+                                        {{ loadingAdminAction ? 'Pulando...' : 'Pular Tópico' }}
+                                    </button>
+                                </div>
+
+                                <!-- Grant Certificate -->
+                                <div class="card">
+                                    <div class="card-header">
+                                        <h4 class="card-title">Conceder Certificado</h4>
+                                    </div>
+                                    <div class="form-group">
+                                        <label class="form-label">ID do Usuário</label>
+                                        <input type="text" class="form-input" v-model="adminTools.grantCertificate.userId" 
+                                               placeholder="ID do usuário">
+                                    </div>
+                                    <div class="form-group">
+                                        <label class="form-label">ID do Tema</label>
+                                        <input type="text" class="form-input" v-model="adminTools.grantCertificate.themeId" 
+                                               placeholder="ID do tema">
+                                    </div>
+                                    <button class="btn btn-success" @click="grantCertificate" 
+                                            :disabled="!adminTools.grantCertificate.userId || !adminTools.grantCertificate.themeId || loadingAdminAction">
+                                        <span class="loading" v-if="loadingAdminAction"></span>
+                                        <i class="fas fa-award" v-else></i>
+                                        {{ loadingAdminAction ? 'Concedendo...' : 'Conceder Certificado' }}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- System Statistics -->
+                        <div class="card">
+                            <div class="card-header">
+                                <h3 class="card-title">Estatísticas do Sistema</h3>
+                            </div>
+                            <div class="stats-grid">
+                                <div class="stat-card">
+                                    <div class="stat-value">{{ systemStats.total_users || 0 }}</div>
+                                    <div class="stat-label">Usuários Totais</div>
+                                </div>
+                                <div class="stat-card">
+                                    <div class="stat-value">{{ systemStats.total_teachers || 0 }}</div>
+                                    <div class="stat-label">Professores</div>
+                                </div>
+                                <div class="stat-card">
+                                    <div class="stat-value">{{ systemStats.total_certificates || 0 }}</div>
+                                    <div class="stat-label">Certificados</div>
+                                </div>
+                                <div class="stat-card">
+                                    <div class="stat-value">{{ systemStats.total_assessments || 0 }}</div>
+                                    <div class="stat-label">Avaliações</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- History View -->
+                <div v-if="currentView === 'history'" class="grid">
+                    <div class="card">
+                        <div class="card-header">
+                            <h2 class="card-title">Histórico de Atividades</h2>
+                        </div>
+
+                        <!-- Filter -->
+                        <div class="form-group">
+                            <label class="form-label">Filtrar por Tema</label>
+                            <select class="form-input" v-model="historyFilter.theme_id" @change="loadHistory">
+                                <option value="">Todos os Temas</option>
+                                <option v-for="theme in themes" :key="theme.id" :value="theme.id">{{ theme.theme_name }}</option>
+                            </select>
+                        </div>
+
+                        <!-- Study Sessions -->
+                        <div class="card">
+                            <div class="card-header">
+                                <h3 class="card-title">Sessões de Estudo</h3>
+                            </div>
+                            
+                            <div v-if="studyHistory.length === 0" class="empty-state">
+                                <i class="fas fa-history empty-state-icon"></i>
+                                <p>Nenhuma sessão de estudo encontrada</p>
+                            </div>
+                            
+                            <div v-else class="grid" style="grid-template-columns: 1fr; gap: 1rem;">
+                                <div v-for="session in studyHistory" :key="session.session_id" class="topic-card">
+                                    <div style="display: flex; justify-content: between; align-items: start;">
+                                        <div>
+                                            <h4 style="margin-bottom: 0.5rem; color: var(--text-primary);">
+                                                {{ session.topic_name }} - {{ session.theme_name }}
+                                            </h4>
+                                            <p style="color: var(--text-muted); font-size: 0.875rem;">
+                                                {{ session.session_type }} • {{ Math.round(session.time_spent / 60) }} minutos
+                                            </p>
+                                        </div>
+                                        <div style="text-align: right;">
+                                            <div class="achievement-badge" 
+                                                 :style="{ background: session.score >= 70 ? 'var(--gradient-success)' : 'var(--gradient-warning)' }">
+                                                {{ session.score }}%
+                                            </div>
+                                            <small style="color: var(--text-muted); display: block; margin-top: 0.5rem;">
+                                                {{ formatDate(session.created_at) }}
+                                            </small>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Assessments -->
+                        <div class="card">
+                            <div class="card-header">
+                                <h3 class="card-title">Avaliações Realizadas</h3>
+                            </div>
+                            
+                            <div v-if="assessmentHistory.length === 0" class="empty-state">
+                                <i class="fas fa-tasks empty-state-icon"></i>
+                                <p>Nenhuma avaliação encontrada</p>
+                            </div>
+                            
+                            <div v-else class="grid" style="grid-template-columns: 1fr; gap: 1rem;">
+                                <div v-for="assessment in assessmentHistory" :key="assessment.assessment_id" class="topic-card">
+                                    <div style="display: flex; justify-content: between; align-items: start;">
+                                        <div>
+                                            <h4 style="margin-bottom: 0.5rem; color: var(--text-primary);">
+                                                {{ assessment.topic_name }} - {{ assessment.theme_name }}
+                                            </h4>
+                                            <p style="color: var(--text-muted); font-size: 0.875rem;">
+                                                {{ assessment.assessment_type === 'quiz' ? 'Simulado' : 'Prova' }} • 
+                                                {{ assessment.total_questions }} questões • 
+                                                {{ Math.round(assessment.time_spent / 60) }} minutos
+                                            </p>
+                                        </div>
+                                        <div style="text-align: right;">
+                                            <div class="achievement-badge" 
+                                                 :style="{ background: assessment.score >= 70 ? 'var(--gradient-success)' : 'var(--gradient-warning)' }">
+                                                {{ assessment.score }}%
+                                            </div>
+                                            <small style="color: var(--text-muted); display: block; margin-top: 0.5rem;">
+                                                {{ formatDate(assessment.completed_at) }}
+                                            </small>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- Lesson Modal -->
+        <div v-if="showLessonModal" class="modal-overlay" @click="closeLessonModal">
+            <div class="modal-content" @click.stop>
+                <div class="modal-header">
+                    <h3 class="card-title">Lição: {{ activeLesson.topic.topic_name }}</h3>
+                    <div>
+                        <button @click="showHelpModal = true; helpSessionId = activeLesson.session_id" class="btn btn-outline">
+                            <i class="fas fa-question-circle"></i>
+                            Ajuda
+                        </button>
+                        <button @click="closeLessonModal" class="btn btn-outline">
+                            <i class="fas fa-times"></i>
+                            Fechar
+                        </button>
+                    </div>
+                </div>
+                <div class="modal-body">
+                    <div class="lesson-content">
+                        <div v-if="activeLesson.content.lição" class="lesson-section">
+                            <div v-html="formatContent(activeLesson.content.lição)"></div>
+                        </div>
+                        
+                        <div v-if="activeLesson.content.exemplos && activeLesson.content.exemplos.length" class="lesson-section">
+                            <h4 style="margin-bottom: 1rem; color: var(--text-primary);">Exemplos Práticos</h4>
+                            <div v-for="(exemplo, index) in activeLesson.content.exemplos" :key="index" class="example-box">
+                                <strong>Exemplo {{ index + 1 }}:</strong> {{ exemplo }}
+                            </div>
+                        </div>
+
+                        <div v-if="activeLesson.content.exercícios && activeLesson.content.exercícios.length" class="lesson-section">
+                            <h4 style="margin-bottom: 1rem; color: var(--text-primary);">Exercícios de Fixação</h4>
+                            <div v-for="(exercicio, index) in activeLesson.content.exercícios" :key="index" class="question-card">
+                                <p><strong>Exercício {{ index + 1 }}:</strong> {{ exercicio }}</p>
+                            </div>
+                        </div>
+
+                        <div v-if="activeLesson.content.objetivos && activeLesson.content.objetivos.length" class="lesson-section">
+                            <h4 style="margin-bottom: 1rem; color: var(--text-primary);">Objetivos de Aprendizado</h4>
+                            <ul style="padding-left: 1.5rem;">
+                                <li v-for="(objetivo, index) in activeLesson.content.objetivos" :key="index" style="margin-bottom: 0.5rem;">
+                                    {{ objetivo }}
+                                </li>
+                            </ul>
+                        </div>
+
+                        <div v-if="activeLesson.content.resumo" class="lesson-section">
+                            <h4 style="margin-bottom: 1rem; color: var(--text-primary);">Resumo</h4>
+                            <div class="example-box">
+                                {{ activeLesson.content.resumo }}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Assessment Modal -->
+        <div v-if="showAssessmentModal" class="modal-overlay" @click="closeAssessmentModal">
+            <div class="modal-content" @click.stop>
+                <div class="modal-header">
+                    <h3 class="card-title">
+                        {{ activeAssessment.assessment_type === 'quiz' ? 'Simulado' : 'Prova' }}: {{ activeAssessment.topic.topic_name }}
+                    </h3>
+                    <div style="display: flex; align-items: center; gap: 1rem;">
+                        <div class="timer" v-if="assessmentTimeLeft > 0">
+                            <i class="fas fa-clock"></i> 
+                            {{ formatTime(assessmentTimeLeft) }}
+                        </div>
+                        <button v-if="activeAssessment.assessment_type === 'quiz'" 
+                                @click="showHelpModal = true; helpAssessmentId = activeAssessment.assessment_id" 
+                                class="btn btn-outline">
+                            <i class="fas fa-question-circle"></i>
+                            Ajuda
+                            <span v-if="helpRemaining !== null" class="help-counter">{{ helpRemaining }}</span>
+                        </button>
+                        <button @click="closeAssessmentModal" class="btn btn-outline">
+                            <i class="fas fa-times"></i>
+                            Fechar
+                        </button>
+                    </div>
+                </div>
+                <div class="modal-body">
+                    <div style="background: rgba(99, 102, 241, 0.05); border-radius: var(--radius-lg); padding: 2rem;">
+                        <div v-for="(question, qIndex) in activeAssessment.questions" :key="qIndex" class="question-card">
+                            <div class="question-text">{{ qIndex + 1 }}. {{ question.pergunta }}</div>
+                            <div class="options-grid">
+                                <div v-for="(option, oIndex) in question.opções" 
+                                     :key="oIndex"
+                                     class="option-item"
+                                     :class="{ selected: assessmentAnswers[qIndex] === option }"
+                                     @click="selectAssessmentAnswer(qIndex, option)">
+                                    {{ option }}
+                                </div>
+                            </div>
+                        </div>
+
+                        <button @click="submitAssessment" class="btn btn-success" style="width: 100%; margin-top: 2rem;" 
+                                :disabled="loadingAssessmentSubmit || Object.keys(assessmentAnswers).length < activeAssessment.questions.length">
+                            <span class="loading" v-if="loadingAssessmentSubmit"></span>
+                            <i class="fas fa-paper-plane" v-else></i>
+                            {{ loadingAssessmentSubmit ? 'Enviando...' : 'Finalizar Avaliação' }}
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Results Modal -->
+        <div v-if="showResultsModal" class="modal-overlay" @click="closeResultsModal">
+            <div class="modal-content" @click.stop>
+                <div class="modal-header">
+                    <h3 class="card-title">Resultado da Avaliação</h3>
+                    <div style="display: flex; align-items: center; gap: 1rem;">
+                        <div class="achievement-badge" 
+                             :style="{ background: assessmentResults.passed ? 'var(--gradient-success)' : 'var(--gradient-danger)' }">
+                            {{ Math.round(assessmentResults.score) }}%
+                        </div>
+                        <button @click="closeResultsModal" class="btn btn-outline">
+                            <i class="fas fa-times"></i>
+                            Fechar
+                        </button>
+                    </div>
+                </div>
+                <div class="modal-body">
+                    <div class="stats-grid" style="margin-bottom: 2rem;">
+                        <div class="stat-card">
+                            <div class="stat-value">{{ assessmentResults.correct_count }}</div>
+                            <div class="stat-label">Acertos</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value">{{ assessmentResults.total_questions }}</div>
+                            <div class="stat-label">Total</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value">{{ Math.round((assessmentResults.correct_count / assessmentResults.total_questions) * 100) }}%</div>
+                            <div class="stat-label">Eficiência</div>
+                        </div>
+                    </div>
+
+                    <div v-if="assessmentResults.passed" class="example-box" style="background: rgba(16, 185, 129, 0.1); border-color: var(--success);">
+                        <i class="fas fa-check-circle" style="color: var(--success);"></i>
+                        <strong>Parabéns!</strong> Você {{ assessmentResults.assessment_type === 'quiz' ? 'passou no simulado' : 'concluiu o tópico' }}!
+                    </div>
+                    
+                    <div v-else class="example-box" style="background: rgba(239, 68, 68, 0.1); border-color: var(--danger);">
+                        <i class="fas fa-exclamation-triangle" style="color: var(--danger);"></i>
+                        <strong>Atenção!</strong> Você não atingiu a nota mínima. Tente novamente!
+                    </div>
+
+                    <div v-if="assessmentResults.analysis" class="lesson-section" style="margin-top: 2rem;">
+                        <h4 style="margin-bottom: 1rem; color: var(--text-primary);">Análise Detalhada</h4>
+                        
+                        <div v-if="assessmentResults.analysis.erros_comuns && assessmentResults.analysis.erros_comuns.length" 
+                             class="example-box" style="background: rgba(239, 68, 68, 0.1); border-color: var(--danger);">
+                            <h5 style="margin-bottom: 0.5rem; color: var(--danger);">Erros Comuns Identificados:</h5>
+                            <ul style="padding-left: 1.5rem;">
+                                <li v-for="(erro, index) in assessmentResults.analysis.erros_comuns" :key="index" style="margin-bottom: 0.25rem;">
+                                    {{ erro }}
+                                </li>
+                            </ul>
+                        </div>
+                        
+                        <div v-if="assessmentResults.analysis.soluções && assessmentResults.analysis.soluções.length" 
+                             class="example-box" style="background: rgba(16, 185, 129, 0.1); border-color: var(--success);">
+                            <h5 style="margin-bottom: 0.5rem; color: var(--success);">Sugestões de Melhoria:</h5>
+                            <ul style="padding-left: 1.5rem;">
+                                <li v-for="(solucao, index) in assessmentResults.analysis.soluções" :key="index" style="margin-bottom: 0.25rem;">
+                                    {{ solucao }}
+                                </li>
+                            </ul>
+                        </div>
+                        
+                        <div v-if="assessmentResults.analysis.recomendações && assessmentResults.analysis.recomendações.length" 
+                             class="example-box">
+                            <h5 style="margin-bottom: 0.5rem; color: var(--text-primary);">Próximos Passos Recomendados:</h5>
+                            <ul style="padding-left: 1.5rem;">
+                                <li v-for="(recomendacao, index) in assessmentResults.analysis.recomendações" :key="index" style="margin-bottom: 0.25rem;">
+                                    {{ recomendacao }}
+                                </li>
+                            </ul>
+                        </div>
+
+                        <div v-if="assessmentResults.analysis.explicações_detalhadas" class="lesson-section">
+                            <h5 style="margin-bottom: 1rem; color: var(--text-primary);">Explicações Detalhadas:</h5>
+                            <div v-for="(explicacao, index) in assessmentResults.analysis.explicações_detalhadas" :key="index" 
+                                 class="question-card" :class="explicacao.isCorrect ? 'correct' : 'incorrect'">
+                                <div class="question-text">{{ explicacao.questão }}</div>
+                                <div class="options-grid">
+                                    <div v-for="(option, oIndex) in explicacao.options" 
+                                         :key="oIndex"
+                                         class="option-item"
+                                         :class="{
+                                             correct: option.startsWith(explicacao.correctAnswer + ')'),
+                                             incorrect: !explicacao.isCorrect && option.startsWith(explicacao.userAnswer + ')')
+                                         }">
+                                        {{ option }}
+                                    </div>
+                                </div>
+                                <div class="example-box" style="margin-top: 1rem;">
+                                    <strong>Explicação:</strong> {{ explicacao.explicação }}
+                                </div>
+                                <div v-if="explicacao.dica_estudo" class="example-box" style="background: rgba(59, 130, 246, 0.1); border-color: var(--primary); margin-top: 0.5rem;">
+                                    <strong>Dica de Estudo:</strong> {{ explicacao.dica_estudo }}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Help Modal -->
+        <div v-if="showHelpModal" class="modal-overlay" @click="closeHelpModal">
+            <div class="modal-content" @click.stop style="max-width: 600px;">
+                <div class="modal-header">
+                    <h3 class="card-title">Ajuda - StudyAI</h3>
+                    <div style="display: flex; align-items: center; gap: 1rem;">
+                        <div v-if="helpRemaining !== null && helpRemaining >= 0" class="help-counter">
+                            Ajudas: {{ helpRemaining }}
+                        </div>
+                        <button @click="closeHelpModal" class="btn btn-outline">
+                            <i class="fas fa-times"></i>
+                            Fechar
+                        </button>
+                    </div>
+                </div>
+                <div class="modal-body">
+                    <div class="chat-container">
+                        <div class="chat-messages">
+                            <div class="chat-message assistant">
+                                Olá! Sou seu assistente de estudo. Como posso ajudá-lo hoje?
+                            </div>
+                            <div v-for="(msg, index) in helpMessages" :key="index" 
+                                 class="chat-message" :class="msg.role">
+                                {{ msg.content }}
+                            </div>
+                        </div>
+                        <div class="chat-input-container">
+                            <input type="text" class="chat-input" v-model="helpMessage" @keyup.enter="sendHelpMessage" 
+                                   placeholder="Digite sua pergunta..." :disabled="loadingHelp">
+                            <button @click="sendHelpMessage" class="btn btn-primary" :disabled="!helpMessage || loadingHelp">
+                                <span class="loading" v-if="loadingHelp"></span>
+                                <i class="fas fa-paper-plane" v-else></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        new Vue({
+            el: '#app',
+            data: {
+                isAuthenticated: false,
+                showRegister: false,
+                darkMode: true,
+                currentView: 'dashboard',
+                
+                user: {},
+                userStats: {},
+                themes: [],
+                recentActivities: [],
+                studyHistory: [],
+                assessmentHistory: [],
+                certificates: [],
+                forumCategories: [],
+                forumPosts: [],
+                forumReplies: [],
+                teacherStudents: [],
+                systemStats: {},
+                
+                selectedTheme: null,
+                themeProgress: { topics: [], current_topic: null },
+                selectedStudentProgress: null,
+                selectedForumCategory: null,
+                selectedForumPost: null,
+                
+                activeLesson: null,
+                activeAssessment: null,
+                assessmentResults: null,
+                
+                assessmentAnswers: {},
+                assessmentTimer: null,
+                assessmentTimeLeft: 0,
+                
+                showCreateTheme: false,
+                showCreatePost: false,
+                showCertificateVerification: false,
+                newTheme: { theme_name: '', description: '' },
+                newPost: { category_id: '', title: '', content: '' },
+                newReply: { content: '' },
+                historyFilter: { theme_id: '' },
+                verificationCode: '',
+                verificationFile: null,
+                verificationResult: null,
+                
+                loginForm: { username: '', password: '' },
+                registerForm: {
+                    username: '', password: '', email: '', role: 'student',
+                    full_name: '', age: null, interests: '',
+                    learning_goals: '', preferred_learning_style: 'visual',
+                    teacher_id: ''
+                },
+                adminTools: {
+                    makeTeacher: { userId: '' },
+                    skipTopic: { userId: '', topicId: '' },
+                    grantCertificate: { userId: '', themeId: '' }
+                },
+                
+                loadingLogin: false,
+                loadingRegister: false,
+                loadingTheme: false,
+                loadingLesson: false,
+                loadingQuiz: false,
+                loadingExam: false,
+                loadingAssessmentSubmit: false,
+                loadingHelp: false,
+                loadingPost: false,
+                loadingReply: false,
+                loadingVerification: false,
+                loadingAdminAction: false,
+                
+                showLessonModal: false,
+                showAssessmentModal: false,
+                showResultsModal: false,
+                showHelpModal: false,
+                
+                helpMessages: [],
+                helpMessage: '',
+                helpSessionId: null,
+                helpAssessmentId: null,
+                helpRemaining: null,
+                
+                notification: {
+                    show: false,
+                    type: 'success',
+                    message: '',
+                    icon: 'fas fa-check'
+                }
+            },
+            
+            computed: {
+                hasCertificates() {
+                    return this.certificates && this.certificates.length > 0;
+                }
+            },
+            
+            async mounted() {
+                const token = localStorage.getItem('token');
+                if (token) {
+                    try {
+                        const response = await axios.get('/user/profile', {
+                            headers: { Authorization: `Bearer ${token}` }
+                        });
+                        this.isAuthenticated = true;
+                        this.user = response.data;
+                        this.loadDashboardData();
+                    } catch (error) {
+                        localStorage.removeItem('token');
+                        this.showNotification('Sessão expirada. Faça login novamente.', 'error');
+                    }
+                }
+                
+                const savedTheme = localStorage.getItem('darkMode');
+                this.darkMode = savedTheme !== 'false';
+            },
+            
+            methods: {
+                async login() {
+                    if (!this.loginForm.username || !this.loginForm.password) {
+                        this.showNotification('Preencha todos os campos obrigatórios', 'error');
+                        return;
+                    }
+
+                    this.loadingLogin = true;
+                    try {
+                        const response = await axios.post('/login', this.loginForm);
+                        localStorage.setItem('token', response.data.token);
+                        this.isAuthenticated = true;
+                        this.user = response.data.user;
+                        this.loadDashboardData();
+                        this.currentView = 'dashboard';
+                        this.showNotification('Login realizado com sucesso!', 'success');
+                    } catch (error) {
+                        this.showNotification('Erro no login: ' + (error.response?.data?.error || 'Credenciais inválidas'), 'error');
+                    } finally {
+                        this.loadingLogin = false;
+                    }
+                },
+                
+                async register() {
+                    if (!this.registerForm.username || !this.registerForm.password || !this.registerForm.email) {
+                        this.showNotification('Preencha todos os campos obrigatórios', 'error');
+                        return;
+                    }
+
+                    if (this.registerForm.password.length < 8) {
+                        this.showNotification('A senha deve ter pelo menos 8 caracteres', 'error');
+                        return;
+                    }
+                    
+                    this.loadingRegister = true;
+                    try {
+                        const payload = {
+                            ...this.registerForm,
+                            interests: this.registerForm.interests.split(',').map(i => i.trim()).filter(i => i),
+                            learning_goals: this.registerForm.learning_goals.split(',').map(g => g.trim()).filter(g => g)
+                        };
+                        
+                        const response = await axios.post('/register', payload);
+                        this.showRegister = false;
+                        this.showNotification('Conta criada com sucesso! Faça login para continuar.', 'success');
+                        this.loginForm.username = this.registerForm.username;
+                        this.loginForm.password = this.registerForm.password;
+                    } catch (error) {
+                        this.showNotification('Erro no registro: ' + (error.response?.data?.error || 'Erro ao criar conta'), 'error');
+                    } finally {
+                        this.loadingRegister = false;
+                    }
+                },
+                
+                logout() {
+                    localStorage.removeItem('token');
+                    this.isAuthenticated = false;
+                    this.user = {};
+                    this.currentView = 'dashboard';
+                    this.showNotification('Logout realizado com sucesso', 'success');
+                },
+                
+                changeView(view) {
+                    this.currentView = view;
+                    if (this.isAuthenticated) {
+                        this.loadViewData();
+                    }
+                },
+                
+                toggleTheme() {
+                    this.darkMode = !this.darkMode;
+                    localStorage.setItem('darkMode', this.darkMode);
+                },
+                
+                copyTeacherId() {
+                    navigator.clipboard.writeText(this.user.id.toString());
+                    this.showNotification('ID copiado para a área de transferência!', 'success');
+                },
+                
+                async loadDashboardData() {
+                    try {
+                        const [statsRes, themesRes, sessionsRes, assessmentsRes, certificatesRes] = await Promise.all([
+                            axios.get('/dashboard/stats', { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }),
+                            axios.get('/themes', { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }),
+                            axios.get('/study/history?limit=5', { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }),
+                            axios.get('/assessment/history?limit=5', { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }),
+                            axios.get('/certificates', { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } })
+                        ]);
+                        
+                        this.userStats = statsRes.data;
+                        this.themes = themesRes.data.themes;
+                        this.studyHistory = sessionsRes.data.sessions || [];
+                        this.assessmentHistory = assessmentsRes.data.assessments || [];
+                        this.certificates = certificatesRes.data.certificates || [];
+                        
+                        this.recentActivities = [
+                            ...this.studyHistory.map(session => ({
+                                id: session.session_id,
+                                theme_name: session.theme_name,
+                                topic_name: session.topic_name,
+                                session_type: session.session_type,
+                                score: session.score,
+                                time_spent: session.time_spent,
+                                created_at: session.created_at
+                            })),
+                            ...this.assessmentHistory.map(assessment => ({
+                                id: assessment.assessment_id,
+                                theme_name: assessment.theme_name,
+                                topic_name: assessment.topic_name,
+                                assessment_type: assessment.assessment_type,
+                                score: assessment.score,
+                                time_spent: assessment.time_spent,
+                                completed_at: assessment.completed_at
+                            }))
+                        ].sort((a, b) => new Date(b.created_at || b.completed_at) - new Date(a.created_at || a.completed_at))
+                         .slice(0, 5);
+                        
+                    } catch (error) {
+                        this.showNotification('Erro ao carregar dados do dashboard', 'error');
+                    }
+                },
+                
+                async loadViewData() {
+                    try {
+                        if (this.currentView === 'history') {
+                            await this.loadHistory();
+                        } else if (this.currentView === 'certificates') {
+                            await this.loadCertificates();
+                        } else if (this.currentView === 'forum') {
+                            await this.loadForumCategories();
+                        } else if (this.currentView === 'teacher' && (this.user.role === 'teacher' || this.user.role === 'admin')) {
+                            await this.loadTeacherStudents();
+                        } else if (this.currentView === 'admin' && this.user.role === 'admin') {
+                            await this.loadSystemStats();
+                        }
+                    } catch (error) {
+                        this.showNotification('Erro ao carregar dados da view', 'error');
+                    }
+                },
+                
+                async createTheme() {
+                    if (!this.newTheme.theme_name) {
+                        this.showNotification('Nome do tema é obrigatório', 'error');
+                        return;
+                    }
+
+                    this.loadingTheme = true;
+                    try {
+                        const response = await axios.post('/themes/create', this.newTheme, {
+                            headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+                        });
+                        
+                        this.themes.push({
+                            id: response.data.theme_id,
+                            theme_name: this.newTheme.theme_name,
+                            description: this.newTheme.description,
+                            tag: response.data.tag,
+                            created_at: new Date().toISOString()
+                        });
+                        
+                        this.newTheme = { theme_name: '', description: '' };
+                        this.showCreateTheme = false;
+                        this.showNotification('Tema criado com sucesso!', 'success');
+                    } catch (error) {
+                        this.showNotification('Erro ao criar tema: ' + (error.response?.data?.error || 'Erro de comunicação'), 'error');
+                    } finally {
+                        this.loadingTheme = false;
+                    }
+                },
+                
+                async deleteTheme(themeId) {
+                    if (!confirm('Tem certeza que deseja remover este tema?')) {
+                        return;
+                    }
+
+                    try {
+                        await axios.delete(`/themes/${themeId}`, {
+                            headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+                        });
+                        
+                        this.themes = this.themes.filter(theme => theme.id !== themeId);
+                        this.showNotification('Tema removido com sucesso!', 'success');
+                    } catch (error) {
+                        this.showNotification('Erro ao remover tema: ' + (error.response?.data?.error || 'Erro de comunicação'), 'error');
+                    }
+                },
+                
+                async selectTheme(theme) {
+                    this.selectedTheme = theme;
+                    this.currentView = 'study';
+                    this.activeLesson = null;
+                    this.activeAssessment = null;
+                    this.assessmentResults = null;
+                    
+                    try {
+                        const response = await axios.get(`/themes/${theme.id}/progress`, {
+                            headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+                        });
+                        
+                        this.themeProgress = response.data;
+                    } catch (error) {
+                        this.showNotification('Erro ao carregar progresso do tema', 'error');
+                    }
+                },
+                
+                async generateLesson() {
+                    this.loadingLesson = true;
+                    try {
+                        const response = await axios.post('/study/generate-lesson', {
+                            theme_id: this.selectedTheme.id
+                        }, {
+                            headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+                        });
+                        
+                        this.activeLesson = response.data;
+                        this.showLessonModal = true;
+                        this.showNotification('Lição gerada com sucesso!', 'success');
+                        
+                        if (this.themeProgress.current_topic) {
+                            this.themeProgress.current_topic.progress = 10;
+                            this.themeProgress.current_topic.lessons_completed += 1;
+                            this.themeProgress.current_topic.quiz_available = true;
+                        }
+                    } catch (error) {
+                        this.showNotification('Erro ao gerar lição: ' + (error.response?.data?.error || 'Erro de comunicação'), 'error');
+                    } finally {
+                        this.loadingLesson = false;
+                    }
+                },
+                
+                closeLessonModal() {
+                    this.showLessonModal = false;
+                    this.activeLesson = null;
+                },
+                
+                async generateQuiz() {
+                    this.loadingQuiz = true;
+                    try {
+                        const response = await axios.post('/study/generate-quiz', {
+                            theme_id: this.selectedTheme.id
+                        }, {
+                            headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+                        });
+                        
+                        this.activeAssessment = response.data;
+                        this.assessmentAnswers = {};
+                        this.assessmentResults = null;
+                        this.assessmentTimeLeft = 30 * 60;
+                        this.showAssessmentModal = true;
+                        this.startAssessmentTimer();
+                        this.showNotification('Simulado gerado com sucesso!', 'success');
+                    } catch (error) {
+                        this.showNotification('Erro ao gerar simulado: ' + (error.response?.data?.error || 'Erro de comunicação'), 'error');
+                    } finally {
+                        this.loadingQuiz = false;
+                    }
+                },
+                
+                async generateExam() {
+                    this.loadingExam = true;
+                    try {
+                        const response = await axios.post('/study/generate-exam', {
+                            theme_id: this.selectedTheme.id
+                        }, {
+                            headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+                        });
+                        
+                        this.activeAssessment = response.data;
+                        this.assessmentAnswers = {};
+                        this.assessmentResults = null;
+                        this.assessmentTimeLeft = 60 * 60;
+                        this.showAssessmentModal = true;
+                        this.startAssessmentTimer();
+                        this.showNotification('Prova gerada com sucesso!', 'success');
+                    } catch (error) {
+                        this.showNotification('Erro ao gerar prova: ' + (error.response?.data?.error || 'Erro de comunicação'), 'error');
+                    } finally {
+                        this.loadingExam = false;
+                    }
+                },
+                
+                closeAssessmentModal() {
+                    this.showAssessmentModal = false;
+                    this.activeAssessment = null;
+                    if (this.assessmentTimer) {
+                        clearInterval(this.assessmentTimer);
+                    }
+                },
+                
+                startAssessmentTimer() {
+                    if (this.assessmentTimer) {
+                        clearInterval(this.assessmentTimer);
+                    }
+                    
+                    this.assessmentTimer = setInterval(() => {
+                        this.assessmentTimeLeft--;
+                        
+                        if (this.assessmentTimeLeft <= 0) {
+                            this.submitAssessment();
+                        }
+                    }, 1000);
+                },
+                
+                selectAssessmentAnswer(questionIndex, answer) {
+                    this.$set(this.assessmentAnswers, questionIndex, answer);
+                },
+                
+                async submitAssessment() {
+                    if (this.assessmentTimer) {
+                        clearInterval(this.assessmentTimer);
+                    }
+                    
+                    this.loadingAssessmentSubmit = true;
+                    try {
+                        const response = await axios.post('/assessment/submit', {
+                            assessment_id: this.activeAssessment.assessment_id,
+                            answers: Object.values(this.assessmentAnswers),
+                            time_spent: (this.activeAssessment.assessment_type === 'quiz' ? 30 * 60 : 60 * 60) - this.assessmentTimeLeft
+                        }, {
+                            headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+                        });
+                        
+                        this.assessmentResults = response.data;
+                        this.showAssessmentModal = false;
+                        this.showResultsModal = true;
+                        
+                        if (this.themeProgress.current_topic) {
+                            this.themeProgress.current_topic.progress = response.data.progress;
+                            this.themeProgress.current_topic.quizzes_completed = Math.floor((response.data.progress - 10) / 10);
+                            
+                            if (this.assessmentResults.assessment_type === 'exam' && this.assessmentResults.passed) {
+                                this.themeProgress.current_topic.exams_completed = 1;
+                                this.themeProgress.current_topic.status = 'completed';
+                                this.themeProgress.current_topic.exam_available = false;
+                            }
+                        }
+                        
+                        this.loadDashboardData();
+                        
+                        if (this.assessmentResults.passed) {
+                            this.showNotification('Avaliação concluída com sucesso!', 'success');
+                        } else {
+                            this.showNotification('Você não atingiu a nota mínima. Tente novamente!', 'warning');
+                        }
+                    } catch (error) {
+                        this.showNotification('Erro ao enviar avaliação: ' + (error.response?.data?.error || 'Erro de comunicação'), 'error');
+                    } finally {
+                        this.loadingAssessmentSubmit = false;
+                    }
+                },
+                
+                closeResultsModal() {
+                    this.showResultsModal = false;
+                    this.assessmentResults = null;
+                },
+                
+                async sendHelpMessage() {
+                    if (!this.helpMessage.trim()) return;
+
+                    this.loadingHelp = true;
+                    
+                    const userMessage = this.helpMessage;
+                    this.helpMessages.push({ role: 'user', content: userMessage });
+                    this.helpMessage = '';
+                    
+                    try {
+                        const response = await axios.post('/study/help', {
+                            session_id: this.helpSessionId,
+                            assessment_id: this.helpAssessmentId,
+                            message: userMessage
+                        }, {
+                            headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+                        });
+                        
+                        this.helpMessages.push({ 
+                            role: 'assistant', 
+                            content: response.data.resposta.resposta || response.data.resposta 
+                        });
+                        
+                        this.helpRemaining = response.data.ajuda_restante;
+                        
+                    } catch (error) {
+                        this.helpMessages.push({ 
+                            role: 'assistant', 
+                            content: 'Erro ao obter ajuda: ' + (error.response?.data?.error || 'Erro de comunicação')
+                        });
+                    } finally {
+                        this.loadingHelp = false;
+                    }
+                },
+                
+                closeHelpModal() {
+                    this.showHelpModal = false;
+                    this.helpMessages = [];
+                    this.helpMessage = '';
+                    this.helpSessionId = null;
+                    this.helpAssessmentId = null;
+                    this.helpRemaining = null;
+                },
+                
+                async loadHistory() {
+                    try {
+                        const [sessionsRes, assessmentsRes] = await Promise.all([
+                            axios.get('/study/history', { 
+                                params: this.historyFilter,
+                                headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } 
+                            }),
+                            axios.get('/assessment/history', { 
+                                params: this.historyFilter,
+                                headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } 
+                            })
+                        ]);
+                        
+                        this.studyHistory = sessionsRes.data.sessions;
+                        this.assessmentHistory = assessmentsRes.data.assessments;
+                    } catch (error) {
+                        this.showNotification('Erro ao carregar histórico', 'error');
+                    }
+                },
+                
+                async loadCertificates() {
+                    try {
+                        const response = await axios.get('/certificates', {
+                            headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+                        });
+                        this.certificates = response.data.certificates || [];
+                    } catch (error) {
+                        this.showNotification('Erro ao carregar certificados', 'error');
+                    }
+                },
+                
+                async verifyCertificate() {
+                    if (!this.verificationCode) {
+                        this.showNotification('Digite o código do certificado', 'error');
+                        return;
+                    }
+
+                    this.loadingVerification = true;
+                    try {
+                        const response = await axios.get(`/certificates/verify/${this.verificationCode}`);
+                        this.verificationResult = response.data;
+                    } catch (error) {
+                        this.verificationResult = {
+                            valid: false,
+                            error: error.response?.data?.error || 'Certificado não encontrado'
+                        };
+                    } finally {
+                        this.loadingVerification = false;
+                    }
+                },
+                
+                handleFileUpload(event) {
+                    const file = event.target.files[0];
+                    if (file) {
+                        const reader = new FileReader();
+                        reader.onload = (e) => {
+                            this.verificationFile = e.target.result;
+                        };
+                        reader.readAsDataURL(file);
+                    }
+                },
+                
+                async verifyCertificateUpload() {
+                    if (!this.verificationFile) {
+                        this.showNotification('Selecione um arquivo', 'error');
+                        return;
+                    }
+
+                    this.loadingVerification = true;
+                    try {
+                        const response = await axios.post('/certificates/upload-verify', {
+                            fileData: this.verificationFile.split(',')[1]
+                        });
+                        this.verificationResult = response.data;
+                    } catch (error) {
+                        this.verificationResult = {
+                            valid: false,
+                            error: error.response?.data?.error || 'Erro ao verificar arquivo'
+                        };
+                    } finally {
+                        this.loadingVerification = false;
+                    }
+                },
+                
+                async loadForumCategories() {
+                    try {
+                        const response = await axios.get('/forum/categories', {
+                            headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+                        });
+                        this.forumCategories = response.data.categories || [];
+                    } catch (error) {
+                        this.showNotification('Erro ao carregar categorias do fórum', 'error');
+                    }
+                },
+                
+                async selectForumCategory(category) {
+                    this.selectedForumCategory = category;
+                    try {
+                        const response = await axios.get(`/forum/posts/${category.id}`, {
+                            headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+                        });
+                        this.forumPosts = response.data.posts || [];
+                    } catch (error) {
+                        this.showNotification('Erro ao carregar posts', 'error');
+                    }
+                },
+                
+                async selectForumPost(post) {
+                    this.selectedForumPost = post;
+                    try {
+                        const response = await axios.get(`/forum/post/${post.id}`, {
+                            headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+                        });
+                        this.selectedForumPost = response.data.post;
+                        this.forumReplies = response.data.replies || [];
+                    } catch (error) {
+                        this.showNotification('Erro ao carregar post', 'error');
+                    }
+                },
+                
+                async createPost() {
+                    if (!this.newPost.category_id || !this.newPost.title || !this.newPost.content) {
+                        this.showNotification('Preencha todos os campos', 'error');
+                        return;
+                    }
+
+                    this.loadingPost = true;
+                    try {
+                        await axios.post('/forum/posts', this.newPost, {
+                            headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+                        });
+                        
+                        this.showCreatePost = false;
+                        this.newPost = { category_id: '', title: '', content: '' };
+                        this.showNotification('Post criado com sucesso!', 'success');
+                        
+                        if (this.selectedForumCategory) {
+                            await this.selectForumCategory(this.selectedForumCategory);
+                        }
+                    } catch (error) {
+                        this.showNotification('Erro ao criar post: ' + (error.response?.data?.error || 'Erro de comunicação'), 'error');
+                    } finally {
+                        this.loadingPost = false;
+                    }
+                },
+                
+                async createReply() {
+                    if (!this.newReply.content) {
+                        this.showNotification('Digite uma resposta', 'error');
+                        return;
+                    }
+
+                    this.loadingReply = true;
+                    try {
+                        await axios.post('/forum/replies', {
+                            post_id: this.selectedForumPost.id,
+                            content: this.newReply.content
+                        }, {
+                            headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+                        });
+                        
+                        this.newReply.content = '';
+                        this.showNotification('Resposta enviada com sucesso!', 'success');
+                        
+                        await this.selectForumPost(this.selectedForumPost);
+                    } catch (error) {
+                        this.showNotification('Erro ao enviar resposta: ' + (error.response?.data?.error || 'Erro de comunicação'), 'error');
+                    } finally {
+                        this.loadingReply = false;
+                    }
+                },
+                
+                async loadTeacherStudents() {
+                    try {
+                        const response = await axios.get('/teacher/students', {
+                            headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+                        });
+                        this.teacherStudents = response.data.students || [];
+                    } catch (error) {
+                        this.showNotification('Erro ao carregar alunos', 'error');
+                    }
+                },
+                
+                async viewStudentProgress(student) {
+                    try {
+                        const response = await axios.get(`/teacher/student/${student.id}/progress`, {
+                            headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+                        });
+                        this.selectedStudentProgress = {
+                            student: student,
+                            themes: response.data.themes || [],
+                            assessments: response.data.assessments || [],
+                            sessions: response.data.sessions || []
+                        };
+                    } catch (error) {
+                        this.showNotification('Erro ao carregar progresso do aluno', 'error');
+                    }
+                },
+                
+                async loadSystemStats() {
+                    try {
+                        const [usersRes, teachersRes, certificatesRes, assessmentsRes] = await Promise.all([
+                            axios.get('/admin/users', { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }),
+                            axios.get('/admin/teachers', { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }),
+                            axios.get('/admin/certificates', { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }),
+                            axios.get('/admin/assessments', { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } })
+                        ]);
+                        
+                        this.systemStats = {
+                            total_users: usersRes.data.count || 0,
+                            total_teachers: teachersRes.data.count || 0,
+                            total_certificates: certificatesRes.data.count || 0,
+                            total_assessments: assessmentsRes.data.count || 0
+                        };
+                    } catch (error) {
+                        console.error('Erro ao carregar estatísticas do sistema:', error);
+                    }
+                },
+                
+                async makeTeacher() {
+                    if (!this.adminTools.makeTeacher.userId) {
+                        this.showNotification('Digite o ID do usuário', 'error');
+                        return;
+                    }
+
+                    this.loadingAdminAction = true;
+                    try {
+                        await axios.post('/admin/make-teacher', {
+                            user_id: this.adminTools.makeTeacher.userId
+                        }, {
+                            headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+                        });
+                        
+                        this.adminTools.makeTeacher.userId = '';
+                        this.showNotification('Usuário promovido a professor com sucesso!', 'success');
+                    } catch (error) {
+                        this.showNotification('Erro ao promover usuário: ' + (error.response?.data?.error || 'Erro de comunicação'), 'error');
+                    } finally {
+                        this.loadingAdminAction = false;
+                    }
+                },
+                
+                async skipTopic() {
+                    if (!this.adminTools.skipTopic.userId || !this.adminTools.skipTopic.topicId) {
+                        this.showNotification('Preencha todos os campos', 'error');
+                        return;
+                    }
+
+                    this.loadingAdminAction = true;
+                    try {
+                        await axios.post('/admin/skip-topic', {
+                            user_id: this.adminTools.skipTopic.userId,
+                            topic_id: this.adminTools.skipTopic.topicId
+                        }, {
+                            headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+                        });
+                        
+                        this.adminTools.skipTopic = { userId: '', topicId: '' };
+                        this.showNotification('Tópico pulado com sucesso!', 'success');
+                    } catch (error) {
+                        this.showNotification('Erro ao pular tópico: ' + (error.response?.data?.error || 'Erro de comunicação'), 'error');
+                    } finally {
+                        this.loadingAdminAction = false;
+                    }
+                },
+                
+                async grantCertificate() {
+                    if (!this.adminTools.grantCertificate.userId || !this.adminTools.grantCertificate.themeId) {
+                        this.showNotification('Preencha todos os campos', 'error');
+                        return;
+                    }
+
+                    this.loadingAdminAction = true;
+                    try {
+                        const response = await axios.post('/admin/grant-certificate', {
+                            user_id: this.adminTools.grantCertificate.userId,
+                            theme_id: this.adminTools.grantCertificate.themeId
+                        }, {
+                            headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+                        });
+                        
+                        this.adminTools.grantCertificate = { userId: '', themeId: '' };
+                        this.showNotification('Certificado concedido com sucesso! Código: ' + response.data.certificate_code, 'success');
+                    } catch (error) {
+                        this.showNotification('Erro ao conceder certificado: ' + (error.response?.data?.error || 'Erro de comunicação'), 'error');
+                    } finally {
+                        this.loadingAdminAction = false;
+                    }
+                },
+                
+                formatContent(content) {
+                    if (!content) return '';
+                    return content.replace(/\n/g, '<br>');
+                },
+                
+                formatTime(seconds) {
+                    const minutes = Math.floor(seconds / 60);
+                    const secs = seconds % 60;
+                    return `${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+                },
+                
+                formatDate(dateString) {
+                    if (!dateString) return '';
+                    return new Date(dateString).toLocaleDateString('pt-BR', {
+                        day: '2-digit',
+                        month: '2-digit',
+                        year: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit'
+                    });
+                },
+                
+                showNotification(message, type = 'success') {
+                    this.notification = {
+                        show: true,
+                        type: type,
+                        message: message,
+                        icon: type === 'success' ? 'fas fa-check' : 
+                              type === 'error' ? 'fas fa-exclamation-triangle' : 'fas fa-info-circle'
+                    };
+                    
+                    setTimeout(() => {
+                        this.notification.show = false;
+                    }, 5000);
+                }
+            }
+        });
+    </script>
+</body>
+</html>

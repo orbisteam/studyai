@@ -1,2656 +1,3023 @@
-# hps_server.py (versão completa com todos os recursos)
-import asyncio
-import aiohttp
-from aiohttp import web
-import socketio
-import json
-import logging
-import os
-import hashlib
-import base64
-from datetime import datetime
-from typing import Dict, List, Optional, Any, Set, Tuple
-import sqlite3
-import time
-import uuid
-import mimetypes
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.asymmetric import rsa, padding
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.backends import default_backend
-from cryptography.exceptions import InvalidSignature
-import aiofiles
-from pathlib import Path
-import threading
-import secrets
-import random
-import math
-import struct
-import cmd
-import sys
-import ssl
-import urllib.parse
-import re
+const express = require('express');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+const sqlite3 = require('sqlite3').verbose();
+const { spawn } = require('child_process');
+const path = require('path');
+const cors = require('cors');
+const crypto = require('crypto');
+const fs = require('fs');
+const PDFDocument = require('pdfkit');
+const pdfParse = require('pdf-parse');
+const multer = require('multer');
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-logger = logging.getLogger("HPS-Server")
+const app = express();
+const PORT = process.env.PORT || 8000;
+const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(64).toString('hex');
+const DB_PATH = './ass.db';
 
-class HPSAdminConsole(cmd.Cmd):
-    intro = 'HPS Administration Console\nType "help" for commands\n'
-    prompt = '(hps-admin) '
+const publicDir = path.join(__dirname, 'public');
+const certificateTemplateDir = path.join(__dirname, 'certificate-template');
+const materialsDir = path.join(__dirname, 'materials');
 
-    def __init__(self, server):
-        super().__init__()
-        self.server = server
+if (!fs.existsSync(publicDir)) {
+    fs.mkdirSync(publicDir, { recursive: true });
+}
 
-    def do_online_users(self, arg):
-        online_count = len([c for c in self.server.connected_clients.values() if c['authenticated']])
-        print(f"Online users: {online_count}")
-        for sid, client in self.server.connected_clients.items():
-            if client['authenticated']:
-                print(f"  {client['username']} - {client['node_type']} - {client['address']}")
+if (!fs.existsSync(certificateTemplateDir)) {
+    fs.mkdirSync(certificateTemplateDir, { recursive: true });
+}
 
-    def do_ban_user(self, arg):
-        args = arg.split()
-        if len(args) < 3:
-            print("Usage: ban_user <username> <duration_seconds> <reason>")
-            return
-        username, duration, reason = args[0], int(args[1]), ' '.join(args[2:])
-        for sid, client in self.server.connected_clients.items():
-            if client['username'] == username:
-                asyncio.run_coroutine_threadsafe(
-                    self.server.ban_client(client['client_identifier'], duration, reason),
-                    self.server.loop
-                )
-                print(f"User {username} banned for {duration} seconds")
-                return
-        print(f"User {username} not found online")
+if (!fs.existsSync(materialsDir)) {
+    fs.mkdirSync(materialsDir, { recursive: true });
+}
 
-    def do_reputation(self, arg):
-        args = arg.split()
-        if not args:
-            print("Usage: reputation <username> [new_reputation]")
-            return
-        username = args[0]
-        with sqlite3.connect(self.server.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute('SELECT reputation FROM user_reputations WHERE username = ?', (username,))
-            row = cursor.fetchone()
-            if row:
-                if len(args) > 1:
-                    new_rep = int(args[1])
-                    cursor.execute('UPDATE user_reputations SET reputation = ? WHERE username = ?', (new_rep, username))
-                    cursor.execute('UPDATE users SET reputation = ? WHERE username = ?', (new_rep, username))
-                    conn.commit()
-                    for sid, client in self.server.connected_clients.items():
-                        if client['username'] == username:
-                            asyncio.run_coroutine_threadsafe(
-                                self.server.sio.emit('reputation_update', {'reputation': new_rep}, room=sid),
-                                self.server.loop
-                            )
-                    print(f"Reputation of {username} changed to {new_rep}")
-                else:
-                    print(f"Reputation of {username}: {row[0]}")
-            else:
-                print(f"User {username} not found")
+const storage = multer.diskStorage({
+    destination: (req, file, cb) => {
+        cb(null, materialsDir);
+    },
+    filename: (req, file, cb) => {
+        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+        cb(null, 'material-' + uniqueSuffix + '.pdf');
+    }
+});
 
-    def do_server_stats(self, arg):
-        with sqlite3.connect(self.server.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute('SELECT COUNT(*) FROM users')
-            total_users = cursor.fetchone()[0]
-            cursor.execute('SELECT COUNT(*) FROM content')
-            total_content = cursor.fetchone()[0]
-            cursor.execute('SELECT COUNT(*) FROM dns_records')
-            total_dns = cursor.fetchone()[0]
-            cursor.execute('SELECT COUNT(*) FROM network_nodes WHERE is_online = 1')
-            online_nodes = cursor.fetchone()[0]
-            cursor.execute('SELECT COUNT(*) FROM content_reports WHERE resolved = 0')
-            pending_reports = cursor.fetchone()[0]
-        print(f"Total users: {total_users}")
-        print(f"Total content: {total_content}")
-        print(f"DNS records: {total_dns}")
-        print(f"Online nodes: {online_nodes}")
-        print(f"Connected clients: {len(self.server.connected_clients)}")
-        print(f"Known servers: {len(self.server.known_servers)}")
-        print(f"Pending reports: {pending_reports}")
-
-    def do_content_stats(self, arg):
-        with sqlite3.connect(self.server.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute('''
-                SELECT mime_type, COUNT(*) as count, SUM(size) as total_size
-                FROM content
-                GROUP BY mime_type
-                ORDER BY count DESC
-            ''')
-            print("Content statistics by MIME type:")
-            for row in cursor.fetchall():
-                print(f"  {row[0]}: {row[1]} files, {row[2] // (1024*1024)}MB")
-
-    def do_node_stats(self, arg):
-        with sqlite3.connect(self.server.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute('''
-                SELECT node_type, COUNT(*) as count, AVG(reputation) as avg_reputation
-                FROM network_nodes
-                WHERE is_online = 1
-                GROUP BY node_type
-            ''')
-            print("Node statistics:")
-            for row in cursor.fetchall():
-                print(f"  {row[0]}: {row[1]} nodes, average reputation: {row[2]:.1f}")
-
-    def do_list_reports(self, arg):
-        with sqlite3.connect(self.server.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute('''
-                SELECT report_id, content_hash, reported_user, reporter, timestamp
-                FROM content_reports
-                WHERE resolved = 0
-                ORDER BY timestamp DESC
-            ''')
-            rows = cursor.fetchall()
-            if not rows:
-                print("No pending reports.")
-            else:
-                print("Pending reports:")
-                for row in rows:
-                    print(f"  Report ID: {row[0]}")
-                    print(f"    Content Hash: {row[1]}")
-                    print(f"    Reported User: {row[2]}")
-                    print(f"    Reporter: {row[3]}")
-                    print(f"    Timestamp: {datetime.fromtimestamp(row[4]).strftime('%Y-%m-d %H:%M:%S')}")
-                    print()
-
-    def do_resolve_report(self, arg):
-        args = arg.split()
-        if not args:
-            print("Usage: resolve_report <report_id> [action: ban|warn|ignore]")
-            return
-        report_id = args[0]
-        action = args[1] if len(args) > 1 else "warn"
-        with sqlite3.connect(self.server.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute('''
-                SELECT content_hash, reported_user, reporter
-                FROM content_reports
-                WHERE report_id = ? AND resolved = 0
-            ''', (report_id,))
-            row = cursor.fetchone()
-            if not row:
-                print(f"Report {report_id} not found or already resolved")
-                return
-            content_hash, reported_user, reporter = row
-            if action == "ban":
-                cursor.execute('UPDATE user_reputations SET reputation = 1 WHERE username = ?', (reported_user,))
-                cursor.execute('UPDATE users SET reputation = 1 WHERE username = ?', (reported_user,))
-                cursor.execute('DELETE FROM content WHERE content_hash = ?', (content_hash,))
-                file_path = os.path.join(self.server.files_dir, f"{content_hash}.dat")
-                if os.path.exists(file_path):
-                    os.remove(file_path)
-                print(f"User {reported_user} banned and content removed")
-            elif action == "warn":
-                cursor.execute('UPDATE user_reputations SET reputation = MAX(1, reputation - 20) WHERE username = ?', (reported_user,))
-                cursor.execute('UPDATE users SET reputation = MAX(1, reputation - 20) WHERE username = ?', (reported_user,))
-                print(f"User {reported_user} warned (-20 reputation)")
-            cursor.execute('UPDATE content_reports SET resolved = 1 WHERE report_id = ?', (report_id,))
-            conn.commit()
-            for sid, client in self.server.connected_clients.items():
-                if client['username'] == reported_user:
-                    cursor.execute('SELECT reputation FROM user_reputations WHERE username = ?', (reported_user,))
-                    rep_row = cursor.fetchone()
-                    if rep_row:
-                        asyncio.run_coroutine_threadsafe(
-                            self.server.sio.emit('reputation_update', {'reputation': rep_row[0]}, room=sid),
-                            self.server.loop
-                        )
-            print(f"Report {report_id} resolved")
-
-    def do_sync_network(self, arg):
-        print("Starting network synchronization...")
-        asyncio.run_coroutine_threadsafe(self.server.sync_with_network(), self.server.loop)
-        print("Synchronization started")
-
-    def do_exit(self, arg):
-        print("Stopping server...")
-        asyncio.run_coroutine_threadsafe(self.server.stop(), self.server.loop)
-        return True
-
-    def do_help(self, arg):
-        print("\nAvailable commands:")
-        print("  online_users - List online users")
-        print("  ban_user <user> <seconds> <reason> - Ban a user")
-        print("  reputation <user> [new_rep] - Show or change reputation")
-        print("  server_stats - Server statistics")
-        print("  content_stats - Content statistics")
-        print("  node_stats - Node statistics")
-        print("  list_reports - List pending reports")
-        print("  resolve_report <report_id> [action] - Resolve a report")
-        print("  sync_network - Sync with network")
-        print("  exit - Stop server")
-        print("  help - Show this help\n")
-
-class HPSServer:
-    def __init__(self, db_path: str = 'hps_server.db', files_dir: str = 'hps_files',
-                 host: str = '0.0.0.0', port: int = 8080, ssl_cert: str = None, ssl_key: str = None):
-        self.db_path = db_path
-        self.files_dir = files_dir
-        self.host = host
-        self.port = port
-        self.address = f"{host}:{port}"
-        self.ssl_cert = ssl_cert
-        self.ssl_key = ssl_key
-        self.loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(self.loop)
-        self.sio = socketio.AsyncServer(async_mode='aiohttp', cors_allowed_origins='*')
-        self.app = web.Application()
-        self.sio.attach(self.app)
-        self.connected_clients: Dict[str, Dict] = {}
-        self.authenticated_users: Dict[str, Dict] = {}
-        self.known_servers: Set[str] = set()
-        self.server_id = str(uuid.uuid4())
-        self.is_running = False
-        self.sync_lock = asyncio.Lock()
-        self.rate_limits: Dict[str, Dict] = {}
-        self.client_reputations: Dict[str, int] = {}
-        self.banned_clients: Dict[str, float] = {}
-        self.pow_challenges: Dict[str, Dict] = {}
-        self.login_attempts: Dict[str, List[float]] = {}
-        self.client_hashrates: Dict[str, float] = {}
-        self.max_upload_size = 100 * 1024 * 1024
-        self.max_content_per_user = 1000
-        self.max_dns_per_user = 100
-        self.violation_counts: Dict[str, int] = {}
-        self.server_auth_challenges: Dict[str, Dict] = {}
-        self.session_keys: Dict[str, bytes] = {}
-        self.server_sync_tasks: Dict[str, asyncio.Task] = {}
-        self.stop_event = asyncio.Event()
-        self.runner = None
-        self.site = None
-        self.backup_server = None
-        self.private_key = None
-        self.public_key_pem = None
-        self.connection_attempts_log: Dict[str, List[Tuple[float, str, str]]] = {}
-        self.server_connectivity_status: Dict[str, Dict[str, Any]] = {}
-        self.generate_server_keys()
-        self.setup_routes()
-        self.setup_handlers()
-        self.init_database()
-        self.load_known_servers()
-        os.makedirs(files_dir, exist_ok=True)
-        self.admin_console = HPSAdminConsole(self)
-        self.console_thread = None
-
-    def start_admin_console(self):
-        def run_console():
-            self.admin_console.cmdloop()
-        self.console_thread = threading.Thread(target=run_console, daemon=True)
-        self.console_thread.start()
-
-    def generate_server_keys(self):
-        self.private_key = rsa.generate_private_key(public_exponent=65537, key_size=4096, backend=default_backend())
-        self.public_key_pem = self.private_key.public_key().public_bytes(
-            encoding=serialization.Encoding.PEM, format=serialization.PublicFormat.SubjectPublicKeyInfo)
-
-    def init_database(self):
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            tables = [
-                '''CREATE TABLE IF NOT EXISTS users (
-                    username TEXT PRIMARY KEY, password_hash TEXT NOT NULL, public_key TEXT NOT NULL,
-                    created_at REAL NOT NULL, last_login REAL NOT NULL, reputation INTEGER DEFAULT 100,
-                    client_identifier TEXT, disk_quota INTEGER DEFAULT 524288000, used_disk_space INTEGER DEFAULT 0,
-                    last_activity REAL NOT NULL)''',
-                '''CREATE TABLE IF NOT EXISTS content (
-                    content_hash TEXT PRIMARY KEY, title TEXT NOT NULL, description TEXT, mime_type TEXT NOT NULL,
-                    size INTEGER NOT NULL, username TEXT NOT NULL, signature TEXT NOT NULL, public_key TEXT NOT NULL,
-                    timestamp REAL NOT NULL, file_path TEXT NOT NULL, verified INTEGER DEFAULT 0,
-                    replication_count INTEGER DEFAULT 1, last_accessed REAL NOT NULL)''',
-                '''CREATE TABLE IF NOT EXISTS dns_records (
-                    domain TEXT PRIMARY KEY, content_hash TEXT NOT NULL, username TEXT NOT NULL,
-                    original_owner TEXT NOT NULL, timestamp REAL NOT NULL, signature TEXT NOT NULL,
-                    verified INTEGER DEFAULT 0, last_resolved REAL NOT NULL, ddns_hash TEXT NOT NULL)''',
-                '''CREATE TABLE IF NOT EXISTS api_apps (
-                    app_name TEXT PRIMARY KEY, username TEXT NOT NULL, content_hash TEXT NOT NULL,
-                    timestamp REAL NOT NULL, last_updated REAL NOT NULL)''',
-                '''CREATE TABLE IF NOT EXISTS network_nodes (
-                    node_id TEXT PRIMARY KEY, address TEXT NOT NULL, public_key TEXT NOT NULL, username TEXT NOT NULL,
-                    last_seen REAL NOT NULL, reputation INTEGER DEFAULT 100, node_type TEXT NOT NULL CHECK(node_type IN ('server', 'client')),
-                    is_online INTEGER DEFAULT 1, client_identifier TEXT, connection_count INTEGER DEFAULT 1)''',
-                '''CREATE TABLE IF NOT EXISTS content_availability (
-                    content_hash TEXT NOT NULL, node_id TEXT NOT NULL, timestamp REAL NOT NULL, is_primary INTEGER DEFAULT 0,
-                    PRIMARY KEY (content_hash, node_id))''',
-                '''CREATE TABLE IF NOT EXISTS server_nodes (
-                    server_id TEXT PRIMARY KEY, address TEXT NOT NULL UNIQUE, public_key TEXT NOT NULL,
-                    last_seen REAL NOT NULL, is_active INTEGER DEFAULT 1, reputation INTEGER DEFAULT 100, sync_priority INTEGER DEFAULT 1)''',
-                '''CREATE TABLE IF NOT EXISTS server_connections (
-                    local_server_id TEXT NOT NULL, remote_server_id TEXT NOT NULL, remote_address TEXT NOT NULL,
-                    last_ping REAL NOT NULL, is_active INTEGER DEFAULT 1, PRIMARY KEY (local_server_id, remote_server_id))''',
-                '''CREATE TABLE IF NOT EXISTS user_reputations (
-                    username TEXT PRIMARY KEY, reputation INTEGER DEFAULT 100, last_updated REAL NOT NULL,
-                    client_identifier TEXT, violation_count INTEGER DEFAULT 0)''',
-                '''CREATE TABLE IF NOT EXISTS content_reports (
-                    report_id TEXT PRIMARY KEY, content_hash TEXT NOT NULL, reported_user TEXT NOT NULL,
-                    reporter TEXT NOT NULL, timestamp REAL NOT NULL, resolved INTEGER DEFAULT 0, resolution_type TEXT)''',
-                '''CREATE TABLE IF NOT EXISTS server_sync_history (
-                    server_address TEXT NOT NULL, last_sync REAL NOT NULL, sync_type TEXT NOT NULL,
-                    items_count INTEGER DEFAULT 0, success INTEGER DEFAULT 1, PRIMARY KEY (server_address, sync_type))''',
-                '''CREATE TABLE IF NOT EXISTS rate_limits (
-                    client_identifier TEXT NOT NULL, action_type TEXT NOT NULL, last_action REAL NOT NULL,
-                    attempt_count INTEGER DEFAULT 1, PRIMARY KEY (client_identifier, action_type))''',
-                '''CREATE TABLE IF NOT EXISTS pow_history (
-                    client_identifier TEXT NOT NULL, challenge TEXT NOT NULL, target_bits INTEGER NOT NULL,
-                    timestamp REAL NOT NULL, success INTEGER DEFAULT 0, solve_time REAL DEFAULT 0)''',
-                '''CREATE TABLE IF NOT EXISTS known_servers (
-                    address TEXT PRIMARY KEY, added_date REAL NOT NULL, last_connected REAL NOT NULL, is_active INTEGER DEFAULT 1)''',
-                '''CREATE TABLE IF NOT EXISTS client_files (
-                    client_identifier TEXT NOT NULL, content_hash TEXT NOT NULL, file_name TEXT NOT NULL,
-                    file_size INTEGER NOT NULL, last_sync REAL NOT NULL, PRIMARY KEY (client_identifier, content_hash))''',
-                '''CREATE TABLE IF NOT EXISTS client_dns_files (
-                    client_identifier TEXT NOT NULL, domain TEXT NOT NULL, ddns_hash TEXT NOT NULL,
-                    last_sync REAL NOT NULL, PRIMARY KEY (client_identifier, domain))''',
-                '''CREATE TABLE IF NOT EXISTS server_connectivity_log (
-                    server_address TEXT NOT NULL, timestamp REAL NOT NULL, protocol_used TEXT NOT NULL,
-                    success INTEGER DEFAULT 0, error_message TEXT, response_time REAL DEFAULT 0,
-                    PRIMARY KEY (server_address, timestamp))''',
-                '''CREATE TABLE IF NOT EXISTS dns_owner_changes (
-                    change_id TEXT PRIMARY KEY, domain TEXT NOT NULL, previous_owner TEXT NOT NULL,
-                    new_owner TEXT NOT NULL, changer TEXT NOT NULL, timestamp REAL NOT NULL,
-                    change_file_hash TEXT NOT NULL)''',
-                '''CREATE TABLE IF NOT EXISTS api_app_versions (
-                    version_id TEXT PRIMARY KEY, app_name TEXT NOT NULL, content_hash TEXT NOT NULL,
-                    username TEXT NOT NULL, timestamp REAL NOT NULL, version_number INTEGER DEFAULT 1,
-                    FOREIGN KEY (app_name) REFERENCES api_apps(app_name) ON DELETE CASCADE)'''
-            ]
-            for table in tables:
-                cursor.execute(table)
-            conn.commit()
-
-    def load_known_servers(self):
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute('SELECT address FROM known_servers WHERE is_active = 1')
-            self.known_servers = {row[0] for row in cursor.fetchall()}
-        logger.info(f"Loaded {len(self.known_servers)} known servers")
-
-    def save_known_servers(self):
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            for server_address in self.known_servers:
-                cursor.execute('''INSERT OR REPLACE INTO known_servers
-                    (address, added_date, last_connected, is_active) VALUES (?, ?, ?, ?)''',
-                    (server_address, time.time(), time.time(), 1))
-            conn.commit()
-
-    def log_connection_attempt(self, server_address: str, protocol: str, success: bool, error_message: str = "", response_time: float = 0):
-        timestamp = time.time()
-        if server_address not in self.connection_attempts_log:
-            self.connection_attempts_log[server_address] = []
-
-        self.connection_attempts_log[server_address].append((timestamp, protocol, "SUCCESS" if success else f"FAILED: {error_message}"))
-
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute('''INSERT INTO server_connectivity_log
-                (server_address, timestamp, protocol_used, success, error_message, response_time)
-                VALUES (?, ?, ?, ?, ?, ?)''',
-                (server_address, timestamp, protocol, 1 if success else 0, error_message, response_time))
-            conn.commit()
-
-        if server_address not in self.server_connectivity_status:
-            self.server_connectivity_status[server_address] = {
-                'last_attempt': timestamp,
-                'last_success': timestamp if success else 0,
-                'preferred_protocol': protocol if success else None,
-                'consecutive_failures': 0,
-                'last_error': error_message
-            }
-        else:
-            status = self.server_connectivity_status[server_address]
-            status['last_attempt'] = timestamp
-            if success:
-                status['last_success'] = timestamp
-                status['preferred_protocol'] = protocol
-                status['consecutive_failures'] = 0
-                status['last_error'] = None
-            else:
-                status['consecutive_failures'] += 1
-                status['last_error'] = error_message
-
-        logger.info(f"Connection to {server_address} via {protocol}: {'SUCCESS' if success else f'FAILED - {error_message}'}")
-
-    async def make_remote_request(self, server_address: str, path: str, method: str = 'GET',
-                                params: Dict = None, data: Any = None, timeout: float = 30.0) -> Tuple[bool, Any, str]:
-        protocols_to_try = ['https', 'http']
-        last_error = ""
-
-        for protocol in protocols_to_try:
-            try:
-                start_time = time.time()
-                url = f"{protocol}://{server_address}{path}"
-
-                ssl_context = None
-                if protocol == 'https':
-                    ssl_context = ssl.create_default_context()
-
-                connector = aiohttp.TCPConnector(ssl=ssl_context)
-                timeout_obj = aiohttp.ClientTimeout(total=timeout)
-
-                async with aiohttp.ClientSession(connector=connector, timeout=timeout_obj) as session:
-                    if method.upper() == 'GET':
-                        async with session.get(url, params=params) as response:
-                            content = await response.read()
-                            response_time = time.time() - start_time
-                            if response.status == 200:
-                                self.log_connection_attempt(server_address, protocol, True, "", response_time)
-                                return True, content, protocol
-                            else:
-                                error_msg = f"HTTP {response.status}"
-                                self.log_connection_attempt(server_address, protocol, False, error_msg, response_time)
-                                last_error = error_msg
-                    elif method.upper() == 'POST':
-                        async with session.post(url, params=params, data=data) as response:
-                            content = await response.read()
-                            response_time = time.time() - start_time
-                            if response.status == 200:
-                                self.log_connection_attempt(server_address, protocol, True, "", response_time)
-                                return True, content, protocol
-                            else:
-                                error_msg = f"HTTP {response.status}"
-                                self.log_connection_attempt(server_address, protocol, False, error_msg, response_time)
-                                last_error = error_msg
-            except ssl.SSLCertVerificationError as e:
-                error_msg = f"SSL certificate error: {str(e)}"
-                self.log_connection_attempt(server_address, protocol, False, error_msg, time.time() - start_time)
-                last_error = error_msg
-            except aiohttp.ClientConnectorSSLError as e:
-                error_msg = f"SSL connection error: {str(e)}"
-                self.log_connection_attempt(server_address, protocol, False, error_msg, time.time() - start_time)
-                last_error = error_msg
-            except aiohttp.ClientConnectorError as e:
-                error_msg = f"Connection error: {str(e)}"
-                self.log_connection_attempt(server_address, protocol, False, error_msg, time.time() - start_time)
-                last_error = error_msg
-            except asyncio.TimeoutError:
-                error_msg = f"Timeout after {timeout}s"
-                self.log_connection_attempt(server_address, protocol, False, error_msg, timeout)
-                last_error = error_msg
-            except Exception as e:
-                error_msg = f"Unexpected error: {str(e)}"
-                self.log_connection_attempt(server_address, protocol, False, error_msg, time.time() - start_time)
-                last_error = error_msg
-
-        logger.warning(f"All connection attempts failed for {server_address}{path}: {last_error}")
-        return False, None, last_error
-
-    async def make_remote_request_json(self, server_address: str, path: str, method: str = 'GET',
-                                     params: Dict = None, data: Any = None, timeout: float = 30.0) -> Tuple[bool, Any, str]:
-        success, content, protocol_or_error = await self.make_remote_request(server_address, path, method, params, data, timeout)
-        if success:
-            try:
-                json_data = json.loads(content.decode('utf-8'))
-                return True, json_data, protocol_or_error
-            except Exception as e:
-                error_msg = f"JSON decode error: {str(e)}"
-                logger.error(f"Failed to parse JSON from {server_address}{path}: {error_msg}")
-                return False, None, error_msg
-        return False, None, protocol_or_error
-
-    def leading_zero_bits(self, h: bytes) -> int:
-        count = 0
-        for byte in h:
-            if byte == 0: count += 8
-            else:
-                count += bin(byte)[2:].zfill(8).index('1')
-                break
-        return count
-
-    def compute_target_bits(self, hashrate: float, target_seconds: float) -> int:
-        if hashrate <= 0: return 1
-        expected_hashes_needed = hashrate * target_seconds
-        if expected_hashes_needed <= 1: return 1
-        b = math.ceil(math.log2(expected_hashes_needed))
-        return max(1, min(256, int(b)))
-
-    def generate_pow_challenge(self, client_identifier: str, action_type: str = "login") -> Dict[str, Any]:
-        now = time.time()
-        if client_identifier not in self.login_attempts:
-            self.login_attempts[client_identifier] = []
-        self.login_attempts[client_identifier] = [t for t in self.login_attempts[client_identifier] if now - t < 300]
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute('SELECT attempt_count FROM rate_limits WHERE client_identifier = ? AND action_type = ?',
-                         (client_identifier, action_type))
-            row = cursor.fetchone()
-            attempt_count = row[0] if row else 1
-        base_bits = 12
-        target_seconds = 30.0
-        if action_type == "upload": base_bits, target_seconds = 8, 20.0
-        elif action_type == "dns": base_bits, target_seconds = 6, 15.0
-        elif action_type == "report": base_bits, target_seconds = 6, 10.0
-        recent_count = len(self.login_attempts[client_identifier]) + attempt_count
-        if recent_count > 0:
-            base_bits += min(10, recent_count)
-            target_seconds += min(120, recent_count * 10)
-        client_hashrate = self.client_hashrates.get(client_identifier, 100000)
-        if client_hashrate <= 0: client_hashrate = 100000
-        target_bits = self.compute_target_bits(client_hashrate, target_seconds)
-        target_bits = max(base_bits, target_bits)
-        challenge_message = secrets.token_bytes(32)
-        challenge = base64.b64encode(challenge_message).decode('utf-8')
-        self.pow_challenges[client_identifier] = {
-            'challenge': challenge, 'target_bits': target_bits, 'timestamp': now,
-            'target_seconds': target_seconds, 'action_type': action_type
+const upload = multer({
+    storage: storage,
+    limits: { fileSize: 50 * 1024 * 1024 },
+    fileFilter: (req, file, cb) => {
+        if (file.mimetype === 'application/pdf') {
+            cb(null, true);
+        } else {
+            cb(new Error('Apenas arquivos PDF são permitidos'));
         }
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute('INSERT INTO pow_history (client_identifier, challenge, target_bits, timestamp) VALUES (?, ?, ?, ?)',
-                         (client_identifier, challenge, target_bits, now))
-            conn.commit()
-        return {'challenge': challenge, 'target_bits': target_bits, 'message': f'Solve PoW for {action_type}', 'target_seconds': target_seconds, 'action_type': action_type}
+    }
+});
 
-    def verify_pow_solution(self, client_identifier: str, nonce: str, hashrate_observed: float, action_type: str) -> bool:
-        if client_identifier not in self.pow_challenges: return False
-        challenge_data = self.pow_challenges[client_identifier]
-        if challenge_data['action_type'] != action_type: return False
-        if time.time() - challenge_data['timestamp'] > 300:
-            del self.pow_challenges[client_identifier]
-            return False
-        challenge = challenge_data['challenge']
-        target_bits = challenge_data['target_bits']
-        try:
-            challenge_bytes = base64.b64decode(challenge)
-            nonce_int = int(nonce)
-            data = challenge_bytes + struct.pack(">Q", nonce_int)
-            hash_result = hashlib.sha256(data).digest()
-            lzb = self.leading_zero_bits(hash_result)
-            if lzb >= target_bits:
-                solve_time = time.time() - challenge_data['timestamp']
-                with sqlite3.connect(self.db_path) as conn:
-                    cursor = conn.cursor()
-                    cursor.execute('UPDATE pow_history SET success = 1, solve_time = ? WHERE client_identifier = ? AND challenge = ?',
-                                 (solve_time, client_identifier, challenge))
-                    conn.commit()
-                del self.pow_challenges[client_identifier]
-                self.login_attempts[client_identifier].append(time.time())
-                if hashrate_observed > 0:
-                    self.client_hashrates[client_identifier] = hashrate_observed
-                return True
-        except Exception as e:
-            logger.error(f"PoW verification error for {client_identifier}: {e}")
-        return False
+app.use(express.static(publicDir));
+app.use(cors());
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-    def check_rate_limit(self, client_identifier, action_type):
-        now = time.time()
-        if client_identifier in self.banned_clients:
-            ban_until = self.banned_clients[client_identifier]
-            if now < ban_until:
-                return False, f"Banned for {int(ban_until - now)} seconds", int(ban_until - now)
-            else:
-                del self.banned_clients[client_identifier]
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute('SELECT last_action, attempt_count FROM rate_limits WHERE client_identifier = ? AND action_type = ?',
-                         (client_identifier, action_type))
-            row = cursor.fetchone()
-            if not row: return True, "", 0
-            last_time, attempt_count = row
-            min_interval = 60
-            if action_type == "upload": min_interval = 60
-            elif action_type == "login": min_interval = 60
-            elif action_type == "dns": min_interval = 60
-            elif action_type == "report": min_interval = 30
-            if now - last_time < min_interval:
-                remaining = min_interval - int(now - last_time)
-                return False, f"Rate limit: {remaining}s remaining", remaining
-            return True, "", 0
+const db = new sqlite3.Database(DB_PATH);
 
-    def update_rate_limit(self, client_identifier, action_type):
-        now = time.time()
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute('SELECT attempt_count FROM rate_limits WHERE client_identifier = ? AND action_type = ?',
-                         (client_identifier, action_type))
-            row = cursor.fetchone()
-            attempt_count = 1
-            if row: attempt_count = row[0] + 1
-            cursor.execute('''INSERT OR REPLACE INTO rate_limits
-                (client_identifier, action_type, last_action, attempt_count) VALUES (?, ?, ?, ?)''',
-                (client_identifier, action_type, now, attempt_count))
-            conn.commit()
+const rateLimitStore = new Map();
 
-    async def ban_client(self, client_identifier, duration=3600, reason="Unknown"):
-        self.banned_clients[client_identifier] = time.time() + duration
-        logger.warning(f"Client {client_identifier} banned for {duration} seconds. Reason: {reason}")
-        for sid, client_info in self.connected_clients.items():
-            if client_info.get('client_identifier') == client_identifier:
-                await self.sio.emit('ban_notification', {'duration': duration, 'reason': reason}, room=sid)
-                self.connected_clients[sid]['authenticated'] = False
-                self.connected_clients[sid]['username'] = None
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute('UPDATE user_reputations SET reputation = 1 WHERE client_identifier = ?', (client_identifier,))
-            cursor.execute('UPDATE users SET reputation = 1 WHERE client_identifier = ?', (client_identifier,))
-            conn.commit()
+const checkRateLimit = (userId, action, windowMs, maxRequests) => {
+    const now = Date.now();
+    const key = `${userId}_${action}`;
 
-    def increment_violation(self, client_identifier):
-        if client_identifier not in self.violation_counts:
-            self.violation_counts[client_identifier] = 0
-        self.violation_counts[client_identifier] += 1
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute('UPDATE user_reputations SET violation_count = violation_count + 1 WHERE client_identifier = ?',
-                         (client_identifier,))
-            conn.commit()
-        return self.violation_counts[client_identifier]
+    if (!rateLimitStore.has(key)) {
+        rateLimitStore.set(key, {
+            count: 1,
+            firstRequest: now,
+            lastRequest: now
+        });
+        return { allowed: true, remaining: maxRequests - 1, resetTime: now + windowMs };
+    }
 
-    def process_app_update(self, content_item, cursor):
-        app_match = re.search(r'\{app:\s*(.+?)\}', content_item['title'])
-        if not app_match:
-            return False
-        app_name = app_match.group(1).strip()
-        cursor.execute('SELECT username, content_hash FROM api_apps WHERE app_name = ?', (app_name,))
-        existing_app = cursor.fetchone()
-        if existing_app:
-            if existing_app[0] != content_item['username']:
-                return False
-            else:
-                old_hash = existing_app[1]
-                cursor.execute('SELECT 1 FROM dns_records WHERE content_hash = ?', (old_hash,))
-                dns_using = cursor.fetchone()
-                cursor.execute('SELECT 1 FROM client_files WHERE content_hash = ?', (old_hash,))
-                client_using = cursor.fetchone()
-                if not dns_using and not client_using:
-                    cursor.execute('DELETE FROM content WHERE content_hash = ?', (old_hash,))
-                    cursor.execute('DELETE FROM content_availability WHERE content_hash = ?', (old_hash,))
-                    cursor.execute('DELETE FROM client_files WHERE content_hash = ?', (old_hash,))
-                    old_file_path = os.path.join(self.files_dir, f"{old_hash}.dat")
-                    if os.path.exists(old_file_path):
-                        os.remove(old_file_path)
-                cursor.execute('UPDATE api_apps SET content_hash = ?, last_updated = ? WHERE app_name = ?',
-                             (content_item['content_hash'], time.time(), app_name))
-                return True
-        else:
-            cursor.execute('INSERT INTO api_apps (app_name, username, content_hash, timestamp, last_updated) VALUES (?, ?, ?, ?, ?)',
-                         (app_name, content_item['username'], content_item['content_hash'], time.time(), time.time()))
-            return True
+    const userLimit = rateLimitStore.get(key);
 
-    def setup_handlers(self):
-        @self.sio.event
-        async def connect(sid, environ):
-            logger.info(f"Client connected: {sid}")
-            self.connected_clients[sid] = {
-                'authenticated': False, 'username': None, 'node_id': None, 'address': None,
-                'public_key': None, 'node_type': None, 'client_identifier': None,
-                'pow_solved': False, 'server_authenticated': False, 'connect_time': time.time()
-            }
-            await self.sio.emit('status', {'message': 'Connected to HPS network'}, room=sid)
-            await self.sio.emit('request_server_auth_challenge', {}, room=sid)
+    if (now - userLimit.firstRequest > windowMs) {
+        userLimit.count = 1;
+        userLimit.firstRequest = now;
+        userLimit.lastRequest = now;
+        rateLimitStore.set(key, userLimit);
+        return { allowed: true, remaining: maxRequests - 1, resetTime: now + windowMs };
+    }
 
-        @self.sio.event
-        async def disconnect(sid):
-            logger.info(f"Client disconnected: {sid}")
-            if sid in self.connected_clients:
-                client_info = self.connected_clients[sid]
-                if client_info['authenticated']:
-                    username = client_info['username']
-                    if username in self.authenticated_users and self.authenticated_users[username]['sid'] == sid:
-                        del self.authenticated_users[username]
-                    if client_info['node_id']:
-                        self.mark_node_offline(client_info['node_id'])
-                del self.connected_clients[sid]
-            await self.broadcast_network_state()
+    if (userLimit.count < maxRequests) {
+        userLimit.count++;
+        userLimit.lastRequest = now;
+        rateLimitStore.set(key, userLimit);
+        return { allowed: true, remaining: maxRequests - userLimit.count, resetTime: userLimit.firstRequest + windowMs };
+    }
 
-        @self.sio.event
-        async def request_server_auth_challenge(sid, data):
-            challenge = secrets.token_urlsafe(32)
-            self.server_auth_challenges[sid] = {'challenge': challenge, 'timestamp': time.time()}
-            challenge_signature = self.private_key.sign(challenge.encode('utf-8'),
-                padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=padding.PSS.MAX_LENGTH), hashes.SHA256())
-            await self.sio.emit('server_auth_challenge', {
-                'challenge': challenge, 'server_public_key': base64.b64encode(self.public_key_pem).decode('utf-8'),
-                'signature': base64.b64encode(challenge_signature).decode('utf-8')}, room=sid)
+    return {
+        allowed: false,
+        remaining: 0,
+        resetTime: userLimit.firstRequest + windowMs,
+        retryAfter: Math.ceil((userLimit.firstRequest + windowMs - now) / 1000)
+    };
+};
 
-        @self.sio.event
-        async def verify_server_auth_response(sid, data):
-            client_challenge = data.get('client_challenge')
-            client_signature = data.get('client_signature')
-            client_public_key_b64 = data.get('client_public_key')
-            if sid not in self.server_auth_challenges:
-                await self.sio.emit('server_auth_result', {'success': False, 'error': 'Invalid or expired server auth challenge'}, room=sid)
-                return
-            challenge_data = self.server_auth_challenges.pop(sid)
-            try:
-                client_public_key = serialization.load_pem_public_key(base64.b64decode(client_public_key_b64), backend=default_backend())
-                client_signature_bytes = base64.b64decode(client_signature)
-                client_public_key.verify(client_signature_bytes, client_challenge.encode('utf-8'),
-                    padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=padding.PSS.MAX_LENGTH), hashes.SHA256())
-                self.connected_clients[sid]['server_authenticated'] = True
-                self.connected_clients[sid]['client_public_key'] = client_public_key_b64
-                await self.sio.emit('server_auth_result', {'success': True, 'client_challenge': client_challenge}, room=sid)
-            except InvalidSignature:
-                logger.warning(f"Failed to verify client signature for {sid}")
-                await self.sio.emit('server_auth_result', {'success': False, 'error': 'Invalid client signature'}, room=sid)
-            except Exception as e:
-                logger.error(f"Server auth verification error for {sid}: {e}")
-                await self.sio.emit('server_auth_result', {'success': False, 'error': f'Internal server auth error: {str(e)}'}, room=sid)
+const rateLimitMiddleware = (action, windowMs, maxRequests) => {
+    return (req, res, next) => {
+        const rateLimit = checkRateLimit(req.user.id, action, windowMs, maxRequests);
 
-        @self.sio.event
-        async def request_pow_challenge(sid, data):
-            try:
-                if not self.connected_clients[sid].get('server_authenticated'):
-                    await self.sio.emit('pow_challenge', {'error': 'Server not authenticated'}, room=sid)
-                    return
-                client_identifier = data.get('client_identifier', '')
-                action_type = data.get('action_type', 'login')
-                if not client_identifier:
-                    await self.sio.emit('pow_challenge', {'error': 'Client identifier required'}, room=sid)
-                    return
-                allowed, message, remaining_time = self.check_rate_limit(client_identifier, action_type)
-                if not allowed:
-                    await self.sio.emit('pow_challenge', {'error': message, 'blocked_until': time.time() + remaining_time}, room=sid)
-                    return
-                challenge_data = self.generate_pow_challenge(client_identifier, action_type)
-                await self.sio.emit('pow_challenge', challenge_data, room=sid)
-            except Exception as e:
-                logger.error(f"PoW challenge error for {sid}: {e}")
-                await self.sio.emit('pow_challenge', {'error': str(e)}, room=sid)
-
-        @self.sio.event
-        async def authenticate(sid, data):
-            try:
-                if not self.connected_clients[sid].get('server_authenticated'):
-                    await self.sio.emit('authentication_result', {'success': False, 'error': 'Server not authenticated'}, room=sid)
-                    return
-                username = data.get('username', '').strip()
-                password_hash = data.get('password_hash', '').strip()
-                public_key_b64 = data.get('public_key', '').strip()
-                node_type = data.get('node_type', 'client')
-                client_identifier = data.get('client_identifier', '')
-                pow_nonce = data.get('pow_nonce', '')
-                hashrate_observed = data.get('hashrate_observed', 0.0)
-                client_challenge_signature = data.get('client_challenge_signature')
-                client_challenge = data.get('client_challenge')
-                if not all([username, password_hash, public_key_b64, client_identifier, client_challenge_signature, client_challenge]):
-                    await self.sio.emit('authentication_result', {'success': False, 'error': 'Missing credentials or challenge signature'}, room=sid)
-                    return
-                if not self.verify_pow_solution(client_identifier, pow_nonce, hashrate_observed, "login"):
-                    await self.sio.emit('authentication_result', {'success': False, 'error': 'Invalid PoW solution'}, room=sid)
-                    await self.ban_client(client_identifier, duration=300, reason="Invalid PoW solution")
-                    return
-                allowed, message, remaining_time = self.check_rate_limit(client_identifier, "login")
-                if not allowed:
-                    await self.sio.emit('authentication_result', {'success': False, 'error': message, 'blocked_until': time.time() + remaining_time}, room=sid)
-                    return
-                try:
-                    public_key = base64.b64decode(public_key_b64)
-                    client_public_key_obj = serialization.load_pem_public_key(public_key, backend=default_backend())
-                except Exception as e:
-                    await self.sio.emit('authentication_result', {'success': False, 'error': f'Invalid public key: {str(e)}'}, room=sid)
-                    await self.ban_client(client_identifier, duration=300, reason="Invalid public key format")
-                    return
-                stored_client_key = self.connected_clients[sid].get('client_public_key')
-                if stored_client_key != public_key_b64:
-                    await self.sio.emit('authentication_result', {'success': False, 'error': 'Public key does not match server authentication'}, room=sid)
-                    return
-                try:
-                    client_signature_bytes = base64.b64decode(client_challenge_signature)
-                    client_public_key_obj.verify(client_signature_bytes, client_challenge.encode('utf-8'),
-                        padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=padding.PSS.MAX_LENGTH), hashes.SHA256())
-                except InvalidSignature:
-                    logger.warning(f"Failed to verify client challenge signature for {sid}")
-                    await self.sio.emit('authentication_result', {'success': False, 'error': 'Invalid client challenge signature'}, room=sid)
-                    return
-                except Exception as e:
-                    logger.error(f"Client challenge signature verification error for {sid}: {e}")
-                    await self.sio.emit('authentication_result', {'success': False, 'error': f'Internal client challenge signature error: {str(e)}'}, room=sid)
-                    return
-                with sqlite3.connect(self.db_path) as conn:
-                    cursor = conn.cursor()
-                    cursor.execute('SELECT password_hash, public_key, reputation FROM users WHERE username = ?', (username,))
-                    row = cursor.fetchone()
-                    reputation = 100
-                    if row:
-                        stored_hash, stored_key, rep = row
-                        reputation = rep
-                        if stored_hash == password_hash:
-                            cursor.execute('UPDATE users SET last_login = ?, public_key = ?, client_identifier = ?, last_activity = ? WHERE username = ?',
-                                (time.time(), public_key_b64, client_identifier, time.time(), username))
-                            conn.commit()
-                            self.connected_clients[sid]['authenticated'] = True
-                            self.connected_clients[sid]['username'] = username
-                            self.connected_clients[sid]['public_key'] = public_key_b64
-                            self.connected_clients[sid]['node_type'] = node_type
-                            self.connected_clients[sid]['client_identifier'] = client_identifier
-                            self.connected_clients[sid]['pow_solved'] = True
-                            self.authenticated_users[username] = {
-                                'sid': sid, 'public_key': public_key_b64, 'node_type': node_type, 'client_identifier': client_identifier
-                            }
-                            await self.sio.emit('authentication_result', {'success': True, 'username': username, 'reputation': reputation}, room=sid)
-                            logger.info(f"User authenticated: {username}")
-                            await self.sync_client_files(client_identifier, sid)
-                            server_list = []
-                            with sqlite3.connect(self.db_path) as conn:
-                                cursor = conn.cursor()
-                                cursor.execute('SELECT address, public_key, last_seen, reputation FROM server_nodes WHERE is_active = 1 ORDER BY reputation DESC')
-                                for row in cursor.fetchall():
-                                    server_list.append({'address': row[0], 'public_key': row[1], 'last_seen': row[2], 'reputation': row[3]})
-                            await self.sio.emit('server_list', {'servers': server_list}, room=sid)
-                            backup_server = await self.select_backup_server()
-                            if backup_server:
-                                await self.sio.emit('backup_server', {'server': backup_server, 'timestamp': time.time()}, room=sid)
-                        else:
-                            await self.sio.emit('authentication_result', {'success': False, 'error': 'Invalid password'}, room=sid)
-                            violation_count = self.increment_violation(client_identifier)
-                            if violation_count >= 3:
-                                await self.ban_client(client_identifier, duration=300, reason="Multiple invalid passwords")
-                    else:
-                        cursor.execute('SELECT reputation FROM user_reputations WHERE client_identifier = ?', (client_identifier,))
-                        rep_row = cursor.fetchone()
-                        if rep_row: reputation = rep_row[0]
-                        else: reputation = 100
-                        cursor.execute('''INSERT INTO users
-                            (username, password_hash, public_key, created_at, last_login, reputation, client_identifier, last_activity)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
-                            (username, password_hash, public_key_b64, time.time(), time.time(), reputation, client_identifier, time.time()))
-                        cursor.execute('''INSERT OR REPLACE INTO user_reputations
-                            (username, reputation, last_updated, client_identifier) VALUES (?, ?, ?, ?)''',
-                            (username, reputation, time.time(), client_identifier))
-                        conn.commit()
-                        self.connected_clients[sid]['authenticated'] = True
-                        self.connected_clients[sid]['username'] = username
-                        self.connected_clients[sid]['public_key'] = public_key_b64
-                        self.connected_clients[sid]['node_type'] = node_type
-                        self.connected_clients[sid]['client_identifier'] = client_identifier
-                        self.connected_clients[sid]['pow_solved'] = True
-                        self.authenticated_users[username] = {
-                            'sid': sid, 'public_key': public_key_b64, 'node_type': node_type, 'client_identifier': client_identifier
-                        }
-                        await self.sio.emit('authentication_result', {'success': True, 'username': username, 'reputation': reputation}, room=sid)
-                        logger.info(f"New user registered: {username}")
-                        server_list = []
-                        with sqlite3.connect(self.db_path) as conn:
-                            cursor = conn.cursor()
-                            cursor.execute('SELECT address, public_key, last_seen, reputation FROM server_nodes WHERE is_active = 1 ORDER BY reputation DESC')
-                            for row in cursor.fetchall():
-                                server_list.append({'address': row[0], 'public_key': row[1], 'last_seen': row[2], 'reputation': row[3]})
-                        await self.sio.emit('server_list', {'servers': server_list}, room=sid)
-                        backup_server = await self.select_backup_server()
-                        if backup_server:
-                            await self.sio.emit('backup_server', {'server': backup_server, 'timestamp': time.time()}, room=sid)
-                self.update_rate_limit(client_identifier, "login")
-            except Exception as e:
-                logger.error(f"Authentication error for {sid}: {e}")
-                await self.sio.emit('authentication_result', {'success': False, 'error': f'Internal server error: {str(e)}'}, room=sid)
-
-        @self.sio.event
-        async def join_network(sid, data):
-            try:
-                if not self.connected_clients[sid]['authenticated']:
-                    await self.sio.emit('network_joined', {'success': False, 'error': 'Not authenticated'}, room=sid)
-                    return
-                node_id = data.get('node_id')
-                address = data.get('address')
-                public_key_b64 = data.get('public_key')
-                username = data.get('username')
-                node_type = data.get('node_type', 'client')
-                client_identifier = data.get('client_identifier', '')
-                if not all([node_id, address, public_key_b64, username]):
-                    await self.sio.emit('network_joined', {'success': False, 'error': 'Missing node information'}, room=sid)
-                    return
-                try:
-                    public_key = base64.b64decode(public_key_b64)
-                    serialization.load_pem_public_key(public_key, backend=default_backend())
-                except Exception as e:
-                    await self.sio.emit('network_joined', {'success': False, 'error': f'Invalid public key: {str(e)}'}, room=sid)
-                    return
-                self.connected_clients[sid]['node_id'] = node_id
-                self.connected_clients[sid]['address'] = address
-                with sqlite3.connect(self.db_path) as conn:
-                    cursor = conn.cursor()
-                    cursor.execute('SELECT reputation FROM user_reputations WHERE username = ?', (username,))
-                    rep_row = cursor.fetchone()
-                    reputation = rep_row[0] if rep_row else 100
-                    cursor.execute('SELECT connection_count FROM network_nodes WHERE node_id = ?', (node_id,))
-                    node_row = cursor.fetchone()
-                    connection_count = 1
-                    if node_row: connection_count = node_row[0] + 1
-                    cursor.execute('''INSERT OR REPLACE INTO network_nodes
-                        (node_id, address, public_key, username, last_seen, reputation, node_type, is_online, client_identifier, connection_count)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                        (node_id, address, public_key_b64, username, time.time(), reputation, node_type, 1, client_identifier, connection_count))
-                    conn.commit()
-                await self.sio.emit('network_joined', {'success': True}, room=sid)
-                await self.broadcast_network_state()
-                logger.info(f"Node joined network: {node_id} ({username}) - Type: {node_type}")
-            except Exception as e:
-                logger.error(f"Network join error for {sid}: {e}")
-                await self.sio.emit('network_joined', {'success': False, 'error': f'Internal server error: {str(e)}'}, room=sid)
-
-        @self.sio.event
-        async def search_content(sid, data):
-            try:
-                if not self.connected_clients[sid]['authenticated']:
-                    await self.sio.emit('search_results', {'error': 'Not authenticated'}, room=sid)
-                    return
-                query = data.get('query', '')
-                limit = data.get('limit', 50)
-                offset = data.get('offset', 0)
-                content_type = data.get('content_type', '')
-                sort_by = data.get('sort_by', 'reputation')
-
-                if query.startswith('(HPS!api)'):
-                    match = re.search(r'\{app:\s*(.+?)\}', query)
-                    if match:
-                        app_name = match.group(1).strip()
-                        with sqlite3.connect(self.db_path) as conn:
-                            cursor = conn.cursor()
-                            cursor.execute('''SELECT c.content_hash, c.title, c.description, c.mime_type, c.size,
-                                c.username, c.signature, c.public_key, c.verified, c.replication_count,
-                                COALESCE(u.reputation, 100) as reputation
-                                FROM api_apps a
-                                JOIN content c ON a.content_hash = c.content_hash
-                                LEFT JOIN user_reputations u ON c.username = u.username
-                                WHERE a.app_name = ?''', (app_name,))
-                            row = cursor.fetchone()
-                            results = []
-                            if row:
-                                results.append({
-                                    'content_hash': row[0], 'title': row[1], 'description': row[2], 'mime_type': row[3], 'size': row[4],
-                                    'username': row[5], 'signature': row[6], 'public_key': row[7], 'verified': bool(row[8]),
-                                    'replication_count': row[9], 'reputation': row[10]
-                                })
-                            await self.sio.emit('search_results', {'results': results}, room=sid)
-                            return
-
-                order_clause = ""
-                if sort_by == "reputation": order_clause = "ORDER BY COALESCE(u.reputation, 100) DESC, c.verified DESC, c.replication_count DESC"
-                elif sort_by == "recent": order_clause = "ORDER BY c.timestamp DESC"
-                elif sort_by == "popular": order_clause = "ORDER BY c.replication_count DESC, c.last_accessed DESC"
-                with sqlite3.connect(self.db_path) as conn:
-                    cursor = conn.cursor()
-                    query_params = []
-                    where_clauses = []
-                    if query:
-                        where_clauses.append("(c.title LIKE ? OR c.description LIKE ? OR c.content_hash LIKE ? OR c.username LIKE ?)")
-                        query_params.extend([f'%{query}%', f'%{query}%', f'%{query}%', f'%{query}%'])
-                    if content_type:
-                        where_clauses.append("c.mime_type LIKE ?")
-                        query_params.append(f'%{content_type}%')
-                    where_sql = "WHERE " + " AND ".join(where_clauses) if where_clauses else ""
-                    sql_query = f'''
-                        SELECT c.content_hash, c.title, c.description, c.mime_type, c.size,
-                        c.username, c.signature, c.public_key, c.verified, c.replication_count,
-                        COALESCE(u.reputation, 100) as reputation
-                        FROM content c
-                        LEFT JOIN user_reputations u ON c.username = u.username
-                        {where_sql}
-                        {order_clause}
-                        LIMIT ? OFFSET ?
-                    '''
-                    query_params.extend([limit, offset])
-                    cursor.execute(sql_query, tuple(query_params))
-                    rows = cursor.fetchall()
-                results = []
-                for row in rows:
-                    results.append({
-                        'content_hash': row[0], 'title': row[1], 'description': row[2], 'mime_type': row[3], 'size': row[4],
-                        'username': row[5], 'signature': row[6], 'public_key': row[7], 'verified': bool(row[8]),
-                        'replication_count': row[9], 'reputation': row[10]
-                    })
-                await self.sio.emit('search_results', {'results': results}, room=sid)
-                logger.info(f"Search by {self.connected_clients[sid].get('username', 'Unknown')}: '{query}' -> {len(results)} results")
-            except Exception as e:
-                logger.error(f"Search error for {sid}: {e}")
-                await self.sio.emit('search_results', {'error': f'Search failed: {str(e)}'}, room=sid)
-
-        @self.sio.event
-        async def publish_content(sid, data):
-            try:
-                if not self.connected_clients[sid]['authenticated']:
-                    await self.sio.emit('publish_result', {'success': False, 'error': 'Not authenticated'}, room=sid)
-                    return
-                client_info = self.connected_clients[sid]
-                client_identifier = client_info['client_identifier']
-                username = client_info['username']
-                pow_nonce = data.get('pow_nonce', '')
-                hashrate_observed = data.get('hashrate_observed', 0.0)
-                if not self.verify_pow_solution(client_identifier, pow_nonce, hashrate_observed, "upload"):
-                    await self.sio.emit('publish_result', {'success': False, 'error': 'Invalid PoW solution'}, room=sid)
-                    await self.ban_client(client_identifier, duration=300, reason="Invalid PoW solution")
-                    return
-                allowed, message, remaining_time = self.check_rate_limit(client_identifier, "upload")
-                if not allowed:
-                    violation_count = self.increment_violation(client_identifier)
-                    if violation_count >= 3:
-                        await self.ban_client(client_identifier, duration=300, reason="Multiple rate limit violations")
-                    await self.sio.emit('publish_result', {'success': False, 'error': message, 'blocked_until': time.time() + remaining_time}, room=sid)
-                    return
-                content_hash = data.get('content_hash')
-                title = data.get('title')
-                description = data.get('description', '')
-                mime_type = data.get('mime_type')
-                size = data.get('size')
-                signature = data.get('signature')
-                public_key_b64 = data.get('public_key')
-                content_b64 = data.get('content_b64')
-                if not all([content_hash, title, mime_type, size, signature, public_key_b64, content_b64]):
-                    await self.sio.emit('publish_result', {'success': False, 'error': 'Missing required fields'}, room=sid)
-                    return
-                try:
-                    content = base64.b64decode(content_b64)
-                except Exception as e:
-                    await self.sio.emit('publish_result', {'success': False, 'error': 'Invalid base64 content'}, room=sid)
-                    return
-                actual_hash = hashlib.sha256(content).hexdigest()
-                if actual_hash != content_hash:
-                    await self.sio.emit('publish_result', {'success': False, 'error': 'Content hash mismatch'}, room=sid)
-                    return
-
-                with sqlite3.connect(self.db_path) as conn:
-                    cursor = conn.cursor()
-
-                    if title.startswith('(HPS!api)'):
-                        app_match = re.search(r'\{app:\s*(.+?)\}', title)
-                        if app_match:
-                            app_name = app_match.group(1).strip()
-                            cursor.execute('SELECT username, content_hash FROM api_apps WHERE app_name = ?', (app_name,))
-                            existing_app = cursor.fetchone()
-                            if existing_app:
-                                if existing_app[0] != username:
-                                    await self.sio.emit('publish_result', {
-                                        'success': False,
-                                        'error': f'API app "{app_name}" is owned by {existing_app[0]}. Only the owner can update.'
-                                    }, room=sid)
-                                    if os.path.exists(file_path):
-                                        os.remove(file_path)
-                                    return
-                                else:
-                                    old_hash = existing_app[1]
-                                    cursor.execute('SELECT 1 FROM dns_records WHERE content_hash = ?', (old_hash,))
-                                    dns_using = cursor.fetchone()
-                                    cursor.execute('SELECT 1 FROM client_files WHERE content_hash = ?', (old_hash,))
-                                    client_using = cursor.fetchone()
-                                    if not dns_using and not client_using:
-                                        cursor.execute('DELETE FROM content WHERE content_hash = ?', (old_hash,))
-                                        cursor.execute('DELETE FROM content_availability WHERE content_hash = ?', (old_hash,))
-                                        cursor.execute('DELETE FROM client_files WHERE content_hash = ?', (old_hash,))
-                                        old_file_path = os.path.join(self.files_dir, f"{old_hash}.dat")
-                                        if os.path.exists(old_file_path):
-                                            os.remove(old_file_path)
-                                    cursor.execute('UPDATE api_apps SET content_hash = ?, last_updated = ? WHERE app_name = ?',
-                                                 (content_hash, time.time(), app_name))
-                                    cursor.execute('SELECT content_hash FROM api_apps WHERE app_name = ?', (app_name,))
-                                    old_hash_row = cursor.fetchone()
-                                    if old_hash_row:
-                                        old_hash = old_hash_row[0]
-                                        cursor.execute('DELETE FROM content WHERE content_hash = ?', (old_hash,))
-                                        old_file_path = os.path.join(self.files_dir, f"{old_hash}.dat")
-                                        if os.path.exists(old_file_path):
-                                            os.remove(old_file_path)
-                            else:
-                                cursor.execute('INSERT INTO api_apps (app_name, username, content_hash, timestamp, last_updated) VALUES (?, ?, ?, ?, ?)',
-                                             (app_name, username, content_hash, time.time(), time.time()))
-                            conn.commit()
-
-                    elif title == '(HPS!dns_change){change_dns_owner=true, proceed=true}':
-                        try:
-                            content_str = content.decode('utf-8')
-                            if not content_str.startswith('# HSYST P2P SERVICE'):
-                                await self.sio.emit('publish_result', {'success': False, 'error': 'Missing HSYST header in DNS change file'}, room=sid)
-                                return
-                            if '### MODIFY:' not in content_str or '# change_dns_owner = true' not in content_str:
-                                await self.sio.emit('publish_result', {'success': False, 'error': 'Invalid DNS change file format'}, room=sid)
-                                return
-                            lines = content_str.splitlines()
-                            domain = None
-                            new_owner = None
-                            in_dns_section = False
-                            for line in lines:
-                                line = line.strip()
-                                if line == '### DNS:':
-                                    in_dns_section = True
-                                    continue
-                                if line == '### :END DNS':
-                                    in_dns_section = False
-                                    continue
-                                if in_dns_section and line.startswith('# NEW_DNAME:'):
-                                    parts = line.split('=')
-                                    if len(parts) == 2:
-                                        domain = parts[1].strip()
-                                if line.startswith('# NEW_DOWNER:'):
-                                    parts = line.split('=')
-                                    if len(parts) == 2:
-                                        new_owner = parts[1].strip()
-                            if not domain or not new_owner:
-                                await self.sio.emit('publish_result', {'success': False, 'error': 'Missing domain or new owner in DNS change file'}, room=sid)
-                                return
-                            cursor.execute('SELECT username, original_owner FROM dns_records WHERE domain = ?', (domain,))
-                            dns_record = cursor.fetchone()
-                            if not dns_record:
-                                await self.sio.emit('publish_result', {'success': False, 'error': f'Domain {domain} not found'}, room=sid)
-                                return
-                            current_owner, original_owner = dns_record
-                            if current_owner != username:
-                                await self.sio.emit('publish_result', {
-                                    'success': False,
-                                    'error': f'You are not the current owner of domain {domain}. Current owner: {current_owner}'
-                                }, room=sid)
-                                return
-                            cursor.execute('UPDATE dns_records SET username = ?, original_owner = ? WHERE domain = ?',
-                                         (new_owner, new_owner, domain))
-                            change_id = str(uuid.uuid4())
-                            cursor.execute('INSERT INTO dns_owner_changes (change_id, domain, previous_owner, new_owner, changer, timestamp, change_file_hash) VALUES (?, ?, ?, ?, ?, ?, ?)',
-                                         (change_id, domain, current_owner, new_owner, username, time.time(), content_hash))
-                            conn.commit()
-                            logger.info(f"DNS ownership transferred: {domain} from {current_owner} to {new_owner} by {username}")
-                        except Exception as e:
-                            logger.error(f"DNS change processing error: {e}")
-                            await self.sio.emit('publish_result', {'success': False, 'error': f'DNS change processing error: {str(e)}'}, room=sid)
-                            return
-
-                    file_path = os.path.join(self.files_dir, f"{content_hash}.dat")
-                    try:
-                        async with aiofiles.open(file_path, 'wb') as f:
-                            await f.write(content)
-                    except Exception as e:
-                        await self.sio.emit('publish_result', {'success': False, 'error': f'Error saving file: {str(e)}'}, room=sid)
-                        return
-
-                    cursor.execute('SELECT COUNT(*) FROM content WHERE username = ?', (username,))
-                    content_count = cursor.fetchone()[0]
-                    if content_count >= self.max_content_per_user:
-                        await self.sio.emit('publish_result', {'success': False, 'error': f'Maximum content limit reached ({self.max_content_per_user})'}, room=sid)
-                        if os.path.exists(file_path):
-                            os.remove(file_path)
-                        return
-                    cursor.execute('SELECT disk_quota, used_disk_space FROM users WHERE username = ?', (username,))
-                    user_quota_row = cursor.fetchone()
-                    if user_quota_row:
-                        disk_quota, used_disk_space = user_quota_row
-                        if (used_disk_space + size) > disk_quota:
-                            await self.sio.emit('publish_result', {'success': False, 'error': f'Disk quota exceeded. Available space: {(disk_quota - used_disk_space) / (1024*1024):.2f}MB'}, room=sid)
-                            if os.path.exists(file_path):
-                                os.remove(file_path)
-                            return
-
-                    verified = 1
-                    cursor.execute('''INSERT OR REPLACE INTO content
-                        (content_hash, title, description, mime_type, size, username, signature, public_key, timestamp, file_path, verified, last_accessed)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                        (content_hash, title, description, mime_type, size, username, signature, public_key_b64, time.time(), file_path, verified, time.time()))
-                    cursor.execute('INSERT OR REPLACE INTO content_availability (content_hash, node_id, timestamp, is_primary) VALUES (?, ?, ?, ?)',
-                        (content_hash, self.connected_clients[sid]['node_id'], time.time(), 1))
-                    cursor.execute('UPDATE users SET used_disk_space = used_disk_space + ? WHERE username = ?', (size, username))
-                    conn.commit()
-                await self.sio.emit('publish_result', {'success': True, 'content_hash': content_hash, 'verified': 1}, room=sid)
-                self.update_rate_limit(client_identifier, "upload")
-                logger.info(f"Content published: {content_hash} by {username}")
-                if not title.startswith('(HPS!api)') and title != '(HPS!dns_change){change_dns_owner=true, proceed=true}':
-                    await self.propagate_content_to_network(content_hash)
-            except Exception as e:
-                logger.error(f"Content publish error for {sid}: {e}")
-                await self.sio.emit('publish_result', {'success': False, 'error': f'Internal server error: {str(e)}'}, room=sid)
-
-        @self.sio.event
-        async def request_content(sid, data):
-            try:
-                if not self.connected_clients[sid]['authenticated']:
-                    await self.sio.emit('content_response', {'error': 'Not authenticated'}, room=sid)
-                    return
-                content_hash = data.get('content_hash')
-                if not content_hash:
-                    await self.sio.emit('content_response', {'error': 'Missing content hash'}, room=sid)
-                    return
-                file_path = os.path.join(self.files_dir, f"{content_hash}.dat")
-                content_metadata = None
-                with sqlite3.connect(self.db_path) as conn:
-                    cursor = conn.cursor()
-                    cursor.execute('''SELECT title, description, mime_type, username, signature, public_key, verified, size
-                        FROM content WHERE content_hash = ?''', (content_hash,))
-                    content_metadata = cursor.fetchone()
-                if not os.path.exists(file_path):
-                    logger.info(f"Content {content_hash} not found locally, searching network.")
-                    await self.sio.emit('content_search_status', {'status': 'searching_network', 'content_hash': content_hash}, room=sid)
-                    content_found = await self.fetch_content_from_network(content_hash)
-                    if not content_found:
-                        await self.sio.emit('content_response', {'success': False, 'error': 'Content not found in network'}, room=sid)
-                        return
-                    with sqlite3.connect(self.db_path) as conn:
-                        cursor = conn.cursor()
-                        cursor.execute('''SELECT title, description, mime_type, username, signature, public_key, verified, size
-                            FROM content WHERE content_hash = ?''', (content_hash,))
-                        content_metadata = cursor.fetchone()
-                if not content_metadata:
-                    await self.sio.emit('content_response', {'success': False, 'error': 'Content metadata not found'}, room=sid)
-                    return
-                try:
-                    async with aiofiles.open(file_path, 'rb') as f:
-                        content = await f.read()
-                    with sqlite3.connect(self.db_path) as conn:
-                        cursor = conn.cursor()
-                        cursor.execute('UPDATE content SET last_accessed = ?, replication_count = replication_count + 1 WHERE content_hash = ?',
-                            (time.time(), content_hash))
-                        conn.commit()
-                    title, description, mime_type, username, signature, public_key, verified, size = content_metadata
-                    await self.sio.emit('content_response', {
-                        'success': True, 'content': base64.b64encode(content).decode('utf-8'), 'title': title,
-                        'description': description, 'mime_type': mime_type, 'username': username, 'signature': signature,
-                        'public_key': public_key, 'verified': verified, 'content_hash': content_hash,
-                        'reputation': self.get_user_reputation(username)
-                    }, room=sid)
-                except Exception as e:
-                    logger.error(f"Failed to read content {content_hash} for {sid}: {e}")
-                    await self.sio.emit('content_response', {'success': False, 'error': f'Failed to read content: {str(e)}'}, room=sid)
-            except Exception as e:
-                logger.error(f"Content request error for {sid}: {e}")
-                await self.sio.emit('content_response', {'success': False, 'error': f'Internal server error: {str(e)}'}, room=sid)
-
-        @self.sio.event
-        async def register_dns(sid, data):
-            try:
-                if not self.connected_clients[sid]['authenticated']:
-                    await self.sio.emit('dns_result', {'success': False, 'error': 'Not authenticated'}, room=sid)
-                    return
-                client_info = self.connected_clients[sid]
-                client_identifier = client_info['client_identifier']
-                username = client_info['username']
-                pow_nonce = data.get('pow_nonce', '')
-                hashrate_observed = data.get('hashrate_observed', 0.0)
-                if not self.verify_pow_solution(client_identifier, pow_nonce, hashrate_observed, "dns"):
-                    await self.sio.emit('dns_result', {'success': False, 'error': 'Invalid PoW solution'}, room=sid)
-                    await self.ban_client(client_identifier, duration=300, reason="Invalid PoW solution")
-                    return
-                allowed, message, remaining_time = self.check_rate_limit(client_identifier, "dns")
-                if not allowed:
-                    violation_count = self.increment_violation(client_identifier)
-                    if violation_count >= 3:
-                        await self.ban_client(client_identifier, duration=300, reason="Multiple rate limit violations")
-                    await self.sio.emit('dns_result', {'success': False, 'error': message, 'blocked_until': time.time() + remaining_time}, room=sid)
-                    return
-                domain = data.get('domain', '').lower().strip()
-                ddns_content_b64 = data.get('ddns_content', '')
-                signature = data.get('signature', '')
-                if not all([domain, ddns_content_b64, signature]):
-                    await self.sio.emit('dns_result', {'success': False, 'error': 'Missing domain, ddns content or signature'}, room=sid)
-                    return
-                if not self.is_valid_domain(domain):
-                    await self.sio.emit('dns_result', {'success': False, 'error': 'Invalid domain'}, room=sid)
-                    return
-                try:
-                    ddns_content = base64.b64decode(ddns_content_b64)
-                except Exception as e:
-                    await self.sio.emit('dns_result', {'success': False, 'error': 'Invalid base64 ddns content'}, room=sid)
-                    return
-                ddns_hash = hashlib.sha256(ddns_content).hexdigest()
-                if not ddns_content.startswith(b'# HSYST P2P SERVICE'):
-                    await self.sio.emit('dns_result', {'success': False, 'error': 'Missing HSYST header in ddns file'}, room=sid)
-                    return
-                header_end = b'### :END START'
-                if header_end not in ddns_content:
-                    await self.sio.emit('dns_result', {'success': False, 'error': 'Invalid HSYST header format in ddns file'}, room=sid)
-                    return
-                header_part, ddns_data_signed = ddns_content.split(header_end, 1)
-                try:
-                    public_key = client_info['public_key']
-                    public_key_obj = serialization.load_pem_public_key(base64.b64decode(public_key), backend=default_backend())
-                    signature_bytes = base64.b64decode(signature)
-                    public_key_obj.verify(signature_bytes, ddns_data_signed,
-                        padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=padding.PSS.MAX_LENGTH), hashes.SHA256())
-                    verified = 1
-                except InvalidSignature:
-                    verified = 0
-                    logger.warning(f"Invalid signature for DNS {domain} by {username}")
-                    with sqlite3.connect(self.db_path) as conn:
-                        cursor = conn.cursor()
-                        cursor.execute('UPDATE user_reputations SET reputation = MAX(1, reputation - 5) WHERE username = ?', (username,))
-                        cursor.execute('SELECT reputation FROM user_reputations WHERE username = ?', (username,))
-                        rep_row = cursor.fetchone()
-                        new_reputation = rep_row[0] if rep_row else 50
-                        conn.commit()
-                    await self.sio.emit('reputation_update', {'reputation': new_reputation}, room=sid)
-                except Exception as e:
-                    logger.error(f"Signature verification failed for DNS {domain}: {e}")
-                    await self.sio.emit('dns_result', {'success': False, 'error': f'Signature verification failed: {str(e)}'}, room=sid)
-                    return
-                ddns_file_path = os.path.join(self.files_dir, f"{ddns_hash}.ddns")
-                try:
-                    async with aiofiles.open(ddns_file_path, 'wb') as f:
-                        await f.write(ddns_content)
-                except Exception as e:
-                    await self.sio.emit('dns_result', {'success': False, 'error': f'Error saving ddns file: {str(e)}'}, room=sid)
-                    return
-                content_hash = self.extract_content_hash_from_ddns(ddns_content)
-                if not content_hash:
-                    await self.sio.emit('dns_result', {'success': False, 'error': 'Could not extract content hash from ddns file'}, room=sid)
-                    return
-                with sqlite3.connect(self.db_path) as conn:
-                    cursor = conn.cursor()
-                    cursor.execute('SELECT username FROM dns_records WHERE domain = ?', (domain,))
-                    existing_record = cursor.fetchone()
-                    if existing_record:
-                        existing_owner = existing_record[0]
-                        if existing_owner != username:
-                            await self.sio.emit('dns_result', {
-                                'success': False,
-                                'error': f'Domain "{domain}" is already registered by {existing_owner}. Domains are non-transferable via regular registration.'
-                            }, room=sid)
-                            violation_count = self.increment_violation(client_identifier)
-                            if violation_count >= 3:
-                                await self.ban_client(client_identifier, duration=600, reason="Multiple domain takeover attempts")
-                            return
-                        cursor.execute('SELECT COUNT(*) FROM dns_records WHERE username = ?', (username,))
-                        dns_count = cursor.fetchone()[0]
-                        if dns_count >= self.max_dns_per_user:
-                            await self.sio.emit('dns_result', {
-                                'success': False,
-                                'error': f'Maximum DNS records limit reached ({self.max_dns_per_user})'
-                            }, room=sid)
-                            return
-                        cursor.execute('''UPDATE dns_records SET
-                            content_hash = ?, username = ?, timestamp = ?, signature = ?, verified = ?, last_resolved = ?, ddns_hash = ?
-                            WHERE domain = ?''',
-                            (content_hash, username, time.time(), signature, verified, time.time(), ddns_hash, domain))
-                    else:
-                        cursor.execute('SELECT COUNT(*) FROM dns_records WHERE username = ?', (username,))
-                        dns_count = cursor.fetchone()[0]
-                        if dns_count >= self.max_dns_per_user:
-                            await self.sio.emit('dns_result', {
-                                'success': False,
-                                'error': f'Maximum DNS records limit reached ({self.max_dns_per_user})'
-                            }, room=sid)
-                            return
-                        cursor.execute('''INSERT INTO dns_records
-                            (domain, content_hash, username, original_owner, timestamp, signature, verified, last_resolved, ddns_hash)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                            (domain, content_hash, username, username, time.time(), signature, verified, time.time(), ddns_hash))
-                    if verified == 1:
-                        cursor.execute('UPDATE user_reputations SET reputation = MIN(100, reputation + 1) WHERE username = ?', (username,))
-                        cursor.execute('SELECT reputation FROM user_reputations WHERE username = ?', (username,))
-                        rep_row = cursor.fetchone()
-                        new_reputation = rep_row[0] if rep_row else 100
-                        conn.commit()
-                        await self.sio.emit('reputation_update', {'reputation': new_reputation}, room=sid)
-                    conn.commit()
-                await self.sio.emit('dns_result', {'success': True, 'domain': domain, 'verified': verified, 'original_owner': username}, room=sid)
-                self.update_rate_limit(client_identifier, "dns")
-                logger.info(f"DNS registered: {domain} -> {content_hash} by {username} (verified: {verified})")
-                await self.propagate_dns_to_network(domain)
-            except Exception as e:
-                logger.error(f"DNS register error for {sid}: {e}")
-                await self.sio.emit('dns_result', {'success': False, 'error': f'Internal server error: {str(e)}'}, room=sid)
-
-        @self.sio.event
-        async def resolve_dns(sid, data):
-            try:
-                if not self.connected_clients[sid]['authenticated']:
-                    await self.sio.emit('dns_resolution', {'success': False, 'error': 'Not authenticated'}, room=sid)
-                    return
-                domain = data.get('domain', '').lower().strip()
-                if not domain:
-                    await self.sio.emit('dns_resolution', {'success': False, 'error': 'Missing domain'}, room=sid)
-                    return
-
-                resolved_data = None
-                ddns_file_path = None
-                ddns_hash = None
-
-                with sqlite3.connect(self.db_path) as conn:
-                    cursor = conn.cursor()
-                    cursor.execute('''SELECT d.content_hash, d.username, d.signature, d.verified, d.ddns_hash, d.original_owner,
-                        COALESCE(u.reputation, 100)
-                        FROM dns_records d
-                        LEFT JOIN user_reputations u ON d.username = u.username
-                        WHERE d.domain = ?
-                        ORDER BY COALESCE(u.reputation, 100) DESC, d.verified DESC
-                        LIMIT 1''', (domain,))
-                    row = cursor.fetchone()
-                    if row:
-                        content_hash, username, signature, verified, ddns_hash, original_owner, reputation = row
-                        resolved_data = {
-                            'content_hash': content_hash, 'username': username, 'signature': signature,
-                            'verified': bool(verified), 'ddns_hash': ddns_hash, 'original_owner': original_owner, 'reputation': reputation
-                        }
-                        cursor.execute('UPDATE dns_records SET last_resolved = ? WHERE domain = ?', (time.time(), domain))
-                        conn.commit()
-
-                if resolved_data:
-                    ddns_hash = resolved_data['ddns_hash']
-                    ddns_file_path = os.path.join(self.files_dir, f"{ddns_hash}.ddns")
-
-                    if not os.path.exists(ddns_file_path):
-                        logger.info(f"DDNS file for DNS {domain} not found locally, searching network.")
-                        await self.sio.emit('dns_search_status', {'status': 'searching_network', 'domain': domain}, room=sid)
-                        ddns_found = await self.fetch_ddns_from_network(domain, ddns_hash)
-                        if not ddns_found:
-                            await self.sio.emit('dns_resolution', {'success': False, 'error': 'DDNS file not found in network'}, room=sid)
-                            return
-                        ddns_file_path = os.path.join(self.files_dir, f"{ddns_hash}.ddns")
-
-                    if os.path.exists(ddns_file_path):
-                        content_hash = resolved_data['content_hash']
-                        file_path = os.path.join(self.files_dir, f"{content_hash}.dat")
-                        if not os.path.exists(file_path):
-                            logger.info(f"Content for DNS {domain} ({content_hash}) not found locally, searching network.")
-                            await self.sio.emit('dns_search_status', {'status': 'searching_network', 'domain': domain}, room=sid)
-                            content_found = await self.fetch_content_from_network(content_hash)
-                            if not content_found:
-                                await self.sio.emit('dns_resolution', {'success': False, 'error': 'Content referenced by domain not found'}, room=sid)
-                                return
-                        await self.sio.emit('dns_resolution', {
-                            'success': True, 'domain': domain, 'content_hash': resolved_data['content_hash'],
-                            'username': resolved_data['username'], 'verified': resolved_data['verified'],
-                            'original_owner': resolved_data['original_owner']
-                        }, room=sid)
-                    else:
-                        await self.sio.emit('dns_resolution', {'success': False, 'error': 'DDNS file not available'}, room=sid)
-                else:
-                    logger.info(f"Domain {domain} not found locally, searching network.")
-                    await self.sio.emit('dns_search_status', {'status': 'searching_network', 'domain': domain}, room=sid)
-                    resolved = await self.resolve_dns_from_network(domain)
-                    if resolved and resolved.get('success'):
-                        await self.sio.emit('dns_resolution', {
-                            'success': True, 'domain': domain, 'content_hash': resolved['content_hash'],
-                            'username': resolved['username'], 'verified': resolved['verified'],
-                            'original_owner': resolved.get('original_owner', resolved['username'])
-                        }, room=sid)
-                    else:
-                        await self.sio.emit('dns_resolution', {'success': False, 'error': 'Domain not found'}, room=sid)
-            except Exception as e:
-                logger.error(f"DNS resolution error for {sid}: {e}")
-                await self.sio.emit('dns_resolution', {'success': False, 'error': f'Internal server error: {str(e)}'}, room=sid)
-
-        @self.sio.event
-        async def report_content(sid, data):
-            try:
-                if not self.connected_clients[sid]['authenticated']:
-                    await self.sio.emit('report_result', {'success': False, 'error': 'Not authenticated'}, room=sid)
-                    return
-                client_info = self.connected_clients[sid]
-                client_identifier = client_info['client_identifier']
-                reporter = client_info['username']
-                pow_nonce = data.get('pow_nonce', '')
-                hashrate_observed = data.get('hashrate_observed', 0.0)
-                if not self.verify_pow_solution(client_identifier, pow_nonce, hashrate_observed, "report"):
-                    await self.sio.emit('report_result', {'success': False, 'error': 'Invalid PoW solution'}, room=sid)
-                    await self.ban_client(client_identifier, duration=300, reason="Invalid PoW solution")
-                    return
-                content_hash = data.get('content_hash')
-                reported_user = data.get('reported_user')
-                if not content_hash or not reported_user:
-                    await self.sio.emit('report_result', {'success': False, 'error': 'Missing hash or user'}, room=sid)
-                    return
-                if reporter == reported_user:
-                    await self.sio.emit('report_result', {'success': False, 'error': 'Cannot report your own content'}, room=sid)
-                    return
-                report_id = str(uuid.uuid4())
-                with sqlite3.connect(self.db_path) as conn:
-                    cursor = conn.cursor()
-                    cursor.execute('''INSERT INTO content_reports
-                        (report_id, content_hash, reported_user, reporter, timestamp)
-                        VALUES (?, ?, ?, ?, ?)''',
-                        (report_id, content_hash, reported_user, reporter, time.time()))
-                    conn.commit()
-                await self.sio.emit('report_result', {'success': True}, room=sid)
-                logger.info(f"Content reported: {content_hash} by {reporter} against {reported_user}")
-                await self.process_content_report(report_id, content_hash, reported_user, reporter)
-            except Exception as e:
-                logger.error(f"Content report error for {sid}: {e}")
-                await self.sio.emit('report_result', {'success': False, 'error': f'Internal server error: {str(e)}'}, room=sid)
-
-        @self.sio.event
-        async def get_network_state(sid, data):
-            try:
-                with sqlite3.connect(self.db_path) as conn:
-                    cursor = conn.cursor()
-                    cursor.execute('SELECT COUNT(*) FROM network_nodes WHERE is_online = 1')
-                    online_nodes = cursor.fetchone()[0]
-                    cursor.execute('SELECT COUNT(*) FROM content')
-                    total_content = cursor.fetchone()[0]
-                    cursor.execute('SELECT COUNT(*) FROM dns_records')
-                    total_dns = cursor.fetchone()[0]
-                    cursor.execute('SELECT node_type, COUNT(*) FROM network_nodes WHERE is_online = 1 GROUP BY node_type')
-                    node_types = {}
-                    for row in cursor.fetchall():
-                        node_types[row[0]] = row[1]
-                await self.sio.emit('network_state', {
-                    'online_nodes': online_nodes, 'total_content': total_content, 'total_dns': total_dns,
-                    'node_types': node_types, 'timestamp': time.time()
-                }, room=sid)
-            except Exception as e:
-                logger.error(f"Network state error for {sid}: {e}")
-                await self.sio.emit('network_state', {'error': f'Internal server error: {str(e)}'}, room=sid)
-
-        @self.sio.event
-        async def get_servers(sid, data):
-            try:
-                with sqlite3.connect(self.db_path) as conn:
-                    cursor = conn.cursor()
-                    cursor.execute('SELECT address, public_key, last_seen, reputation FROM server_nodes WHERE is_active = 1 ORDER BY reputation DESC')
-                    rows = cursor.fetchall()
-                servers = []
-                for row in rows:
-                    servers.append({'address': row[0], 'public_key': row[1], 'last_seen': row[2], 'reputation': row[3]})
-                await self.sio.emit('server_list', {'servers': servers}, room=sid)
-            except Exception as e:
-                logger.error(f"Server list error for {sid}: {e}")
-                await self.sio.emit('server_list', {'error': f'Internal server error: {str(e)}'}, room=sid)
-
-        @self.sio.event
-        async def sync_servers(sid, data):
-            try:
-                if not self.connected_clients[sid]['authenticated']: return
-                servers = data.get('servers', [])
-                for server in servers:
-                    if server not in self.known_servers and server != self.address:
-                        self.known_servers.add(server)
-                        asyncio.create_task(self.sync_with_server(server))
-                self.save_known_servers()
-            except Exception as e:
-                logger.error(f"Server sync error for {sid}: {e}")
-
-        @self.sio.event
-        async def user_activity(sid, data):
-            try:
-                if not self.connected_clients[sid]['authenticated']: return
-                username = self.connected_clients[sid]['username']
-                activity_type = data.get('type', 'general')
-                with sqlite3.connect(self.db_path) as conn:
-                    cursor = conn.cursor()
-                    cursor.execute('UPDATE users SET last_activity = ? WHERE username = ?', (time.time(), username))
-                    conn.commit()
-                logger.debug(f"User activity {username}: {activity_type}")
-            except Exception as e:
-                logger.error(f"User activity error for {sid}: {e}")
-
-        @self.sio.event
-        async def server_ping(sid, data):
-            try:
-                remote_server_id = data.get('server_id')
-                remote_address = data.get('address')
-                remote_public_key = data.get('public_key')
-                if not remote_server_id or not remote_address or not remote_public_key:
-                    logger.warning(f"Invalid server ping from {sid}")
-                    return
-                with sqlite3.connect(self.db_path) as conn:
-                    cursor = conn.cursor()
-                    cursor.execute('''INSERT OR REPLACE INTO server_nodes
-                        (server_id, address, public_key, last_seen, is_active, reputation, sync_priority)
-                        VALUES (?, ?, ?, ?, ?, ?, ?)''',
-                        (remote_server_id, remote_address, remote_public_key, time.time(), 1, 100, 1))
-                    cursor.execute('''INSERT OR REPLACE INTO server_connections
-                        (local_server_id, remote_server_id, remote_address, last_ping, is_active)
-                        VALUES (?, ?, ?, ?, ?)''',
-                        (self.server_id, remote_server_id, remote_address, time.time(), 1))
-                    conn.commit()
-                self.known_servers.add(remote_address)
-                await self.sio.emit('server_pong', {
-                    'server_id': self.server_id, 'address': self.address,
-                    'public_key': base64.b64encode(self.public_key_pem).decode('utf-8')
-                }, room=sid)
-                logger.debug(f"Ping received from {remote_address}, responding with pong.")
-            except Exception as e:
-                logger.error(f"Server ping error from {sid}: {e}")
-
-        @self.sio.event
-        async def get_backup_server(sid, data):
-            try:
-                if self.backup_server:
-                    await self.sio.emit('backup_server', {'server': self.backup_server, 'timestamp': time.time()}, room=sid)
-                else:
-                    await self.sio.emit('backup_server', {'error': 'No backup server available'}, room=sid)
-            except Exception as e:
-                logger.error(f"Backup server request error for {sid}: {e}")
-
-        @self.sio.event
-        async def sync_client_files(sid, data):
-            try:
-                if not self.connected_clients[sid]['authenticated']: return
-                client_identifier = self.connected_clients[sid]['client_identifier']
-                files = data.get('files', [])
-                with sqlite3.connect(self.db_path) as conn:
-                    cursor = conn.cursor()
-                    for file_info in files:
-                        content_hash = file_info['content_hash']
-                        file_name = file_info['file_name']
-                        file_size = file_info['file_size']
-                        cursor.execute('INSERT OR REPLACE INTO client_files (client_identifier, content_hash, file_name, file_size, last_sync) VALUES (?, ?, ?, ?, ?)',
-                            (client_identifier, content_hash, file_name, file_size, time.time()))
-                    conn.commit()
-                logger.info(f"Synced {len(files)} files from client {client_identifier}")
-            except Exception as e:
-                logger.error(f"Client files sync error for {sid}: {e}")
-
-        @self.sio.event
-        async def sync_client_dns_files(sid, data):
-            try:
-                if not self.connected_clients[sid]['authenticated']: return
-                client_identifier = self.connected_clients[sid]['client_identifier']
-                dns_files = data.get('dns_files', [])
-                with sqlite3.connect(self.db_path) as conn:
-                    cursor = conn.cursor()
-                    for dns_file in dns_files:
-                        domain = dns_file['domain']
-                        ddns_hash = dns_file['ddns_hash']
-                        cursor.execute('INSERT OR REPLACE INTO client_dns_files (client_identifier, domain, ddns_hash, last_sync) VALUES (?, ?, ?, ?)',
-                            (client_identifier, domain, ddns_hash, time.time()))
-                    conn.commit()
-                logger.info(f"Synced {len(dns_files)} DNS files from client {client_identifier}")
-            except Exception as e:
-                logger.error(f"Client DNS files sync error for {sid}: {e}")
-
-        @self.sio.event
-        async def request_client_files(sid, data):
-            try:
-                if not self.connected_clients[sid]['authenticated']: return
-                client_identifier = self.connected_clients[sid]['client_identifier']
-                content_hashes = data.get('content_hashes', [])
-                missing_files = []
-                with sqlite3.connect(self.db_path) as conn:
-                    cursor = conn.cursor()
-                    for content_hash in content_hashes:
-                        cursor.execute('SELECT 1 FROM content WHERE content_hash = ?', (content_hash,))
-                        if not cursor.fetchone():
-                            missing_files.append(content_hash)
-                await self.sio.emit('client_files_response', {'missing_files': missing_files}, room=sid)
-            except Exception as e:
-                logger.error(f"Client files request error for {sid}: {e}")
-
-        @self.sio.event
-        async def request_client_dns_files(sid, data):
-            try:
-                if not self.connected_clients[sid]['authenticated']: return
-                client_identifier = self.connected_clients[sid]['client_identifier']
-                domains = data.get('domains', [])
-                missing_dns = []
-                with sqlite3.connect(self.db_path) as conn:
-                    cursor = conn.cursor()
-                    for domain in domains:
-                        cursor.execute('SELECT 1 FROM dns_records WHERE domain = ?', (domain,))
-                        if not cursor.fetchone():
-                            missing_dns.append(domain)
-                await self.sio.emit('client_dns_files_response', {'missing_dns': missing_dns}, room=sid)
-            except Exception as e:
-                logger.error(f"Client DNS files request error for {sid}: {e}")
-
-        @self.sio.event
-        async def request_content_from_client(sid, data):
-            try:
-                if not self.connected_clients[sid]['authenticated']: return
-                content_hash = data.get('content_hash')
-                if not content_hash: return
-                file_path = os.path.join(self.files_dir, f"{content_hash}.dat")
-                if os.path.exists(file_path):
-                    with sqlite3.connect(self.db_path) as conn:
-                        cursor = conn.cursor()
-                        cursor.execute('SELECT 1 FROM content WHERE content_hash = ?', (content_hash,))
-                        if cursor.fetchone(): return
-                    async with aiofiles.open(file_path, 'rb') as f:
-                        content = await f.read()
-                    with sqlite3.connect(self.db_path) as conn:
-                        cursor = conn.cursor()
-                        cursor.execute('SELECT title, description, mime_type, username, signature, public_key, verified FROM content WHERE content_hash = ?', (content_hash,))
-                        row = cursor.fetchone()
-                        if not row: return
-                        title, description, mime_type, username, signature, public_key, verified = row
-                    await self.sio.emit('content_from_client', {
-                        'content_hash': content_hash, 'content': base64.b64encode(content).decode('utf-8'),
-                        'title': title, 'description': description, 'mime_type': mime_type, 'username': username,
-                        'signature': signature, 'public_key': public_key, 'verified': verified
-                    }, room=sid)
-                    logger.info(f"Content {content_hash} shared from client {self.connected_clients[sid]['username']}")
-            except Exception as e:
-                logger.error(f"Error sharing content from client: {e}")
-
-        @self.sio.event
-        async def request_ddns_from_client(sid, data):
-            try:
-                if not self.connected_clients[sid]['authenticated']: return
-                domain = data.get('domain')
-                if not domain: return
-                ddns_file_path = os.path.join(self.files_dir, f"{domain}.ddns")
-                if not os.path.exists(ddns_file_path):
-                    with sqlite3.connect(self.db_path) as conn:
-                        cursor = conn.cursor()
-                        cursor.execute('SELECT ddns_hash FROM dns_records WHERE domain = ?', (domain,))
-                        row = cursor.fetchone()
-                        if row:
-                            ddns_hash = row[0]
-                            ddns_file_path = os.path.join(self.files_dir, f"{ddns_hash}.ddns")
-                if os.path.exists(ddns_file_path):
-                    async with aiofiles.open(ddns_file_path, 'rb') as f:
-                        ddns_content = await f.read()
-                    with sqlite3.connect(self.db_path) as conn:
-                        cursor = conn.cursor()
-                        cursor.execute('SELECT content_hash, username, signature, public_key, verified FROM dns_records WHERE domain = ?', (domain,))
-                        row = cursor.fetchone()
-                        if not row: return
-                        content_hash, username, signature, public_key, verified = row
-                    await self.sio.emit('ddns_from_client', {
-                        'domain': domain, 'ddns_content': base64.b64encode(ddns_content).decode('utf-8'),
-                        'content_hash': content_hash, 'username': username, 'signature': signature,
-                        'public_key': public_key, 'verified': verified
-                    }, room=sid)
-                    logger.info(f"DDNS {domain} shared from client {self.connected_clients[sid]['username']}")
-            except Exception as e:
-                logger.error(f"Error sharing DDNS from client: {e}")
-
-        @self.sio.event
-        async def content_from_client(sid, data):
-            try:
-                content_hash = data.get('content_hash')
-                content_b64 = data.get('content')
-                title = data.get('title')
-                description = data.get('description')
-                mime_type = data.get('mime_type')
-                username = data.get('username')
-                signature = data.get('signature')
-                public_key = data.get('public_key')
-                verified = data.get('verified', False)
-                if not all([content_hash, content_b64, title, mime_type, username, signature, public_key]): return
-                content = base64.b64decode(content_b64)
-                file_path = os.path.join(self.files_dir, f"{content_hash}.dat")
-                if not os.path.exists(file_path):
-                    async with aiofiles.open(file_path, 'wb') as f:
-                        await f.write(content)
-                with sqlite3.connect(self.db_path) as conn:
-                    cursor = conn.cursor()
-                    cursor.execute('SELECT 1 FROM content WHERE content_hash = ?', (content_hash,))
-                    if not cursor.fetchone():
-                        cursor.execute('''INSERT INTO content
-                            (content_hash, title, description, mime_type, size, username, signature, public_key, timestamp, file_path, verified, last_accessed)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                            (content_hash, title, description, mime_type, len(content), username, signature, public_key, time.time(), file_path, verified, time.time()))
-                        conn.commit()
-                        logger.info(f"Content {content_hash} saved from client share")
-            except Exception as e:
-                logger.error(f"Error processing content from client: {e}")
-
-        @self.sio.event
-        async def ddns_from_client(sid, data):
-            try:
-                domain = data.get('domain')
-                ddns_content_b64 = data.get('ddns_content')
-                content_hash = data.get('content_hash')
-                username = data.get('username')
-                signature = data.get('signature')
-                public_key = data.get('public_key')
-                verified = data.get('verified', False)
-                if not all([domain, ddns_content_b64, content_hash, username, signature, public_key]): return
-                ddns_content = base64.b64decode(ddns_content_b64)
-                ddns_hash = hashlib.sha256(ddns_content).hexdigest()
-                file_path = os.path.join(self.files_dir, f"{ddns_hash}.ddns")
-                if not os.path.exists(file_path):
-                    async with aiofiles.open(file_path, 'wb') as f:
-                        await f.write(ddns_content)
-                with sqlite3.connect(self.db_path) as conn:
-                    cursor = conn.cursor()
-                    cursor.execute('SELECT 1 FROM dns_records WHERE domain = ?', (domain,))
-                    if not cursor.fetchone():
-                        cursor.execute('''INSERT INTO dns_records
-                            (domain, content_hash, username, original_owner, timestamp, signature, verified, last_resolved, ddns_hash)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                            (domain, content_hash, username, username, time.time(), signature, verified, time.time(), ddns_hash))
-                        conn.commit()
-                        logger.info(f"DNS {domain} saved from client share")
-            except Exception as e:
-                logger.error(f"Error processing DDNS from client: {e}")
-
-    def setup_routes(self):
-        self.app.router.add_post('/upload', self.handle_upload)
-        self.app.router.add_get('/content/{content_hash}', self.handle_content_request)
-        self.app.router.add_get('/dns/{domain}', self.handle_dns_request)
-        self.app.router.add_get('/ddns/{domain}', self.handle_ddns_request)
-        self.app.router.add_get('/sync/content', self.handle_sync_content)
-        self.app.router.add_get('/sync/dns', self.handle_sync_dns)
-        self.app.router.add_get('/sync/users', self.handle_sync_users)
-        self.app.router.add_get('/health', self.handle_health)
-        self.app.router.add_get('/server_info', self.handle_server_info)
-
-    async def handle_upload(self, request):
-        try:
-            reader = await request.multipart()
-            file_field = await reader.next()
-            if not file_field or file_field.name != 'file':
-                logger.warning("Upload attempt without file.")
-                return web.json_response({'success': False, 'error': 'File missing'}, status=400)
-            file_data = await file_field.read()
-            username = request.headers.get('X-Username', '')
-            signature = request.headers.get('X-Signature', '')
-            public_key_b64 = request.headers.get('X-Public-Key', '')
-            client_identifier = request.headers.get('X-Client-ID', '')
-            if not all([username, signature, public_key_b64, client_identifier]):
-                logger.warning(f"Upload attempt without auth headers from {request.remote}.")
-                return web.json_response({'success': False, 'error': 'Missing auth headers'}, status=401)
-            allowed, message, remaining_time = self.check_rate_limit(client_identifier, "upload")
-            if not allowed:
-                logger.warning(f"Upload blocked by rate limit for {client_identifier}: {message}")
-                return web.json_response({'success': False, 'error': message, 'blocked_until': time.time() + remaining_time}, status=429)
-            content_hash = hashlib.sha256(file_data).hexdigest()
-            file_path = os.path.join(self.files_dir, f"{content_hash}.dat")
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                cursor.execute('SELECT disk_quota, used_disk_space FROM users WHERE username = ?', (username,))
-                user_quota_row = cursor.fetchone()
-                if user_quota_row:
-                    disk_quota, used_disk_space = user_quota_row
-                    if (used_disk_space + len(file_data)) > disk_quota:
-                        logger.warning(f"Upload from {username} exceeded disk quota.")
-                        return web.json_response({'success': False, 'error': f'Disk quota exceeded. Available space: {(disk_quota - used_disk_space) / (1024*1024):.2f}MB'}, status=413)
-            async with aiofiles.open(file_path, 'wb') as f:
-                await f.write(file_data)
-            self.update_rate_limit(client_identifier, "upload")
-            logger.info(f"File {content_hash} received via HTTP from {username}.")
-            return web.json_response({'success': True, 'content_hash': content_hash, 'message': 'File received successfully'})
-        except Exception as e:
-            logger.error(f"HTTP upload error from {request.remote}: {e}")
-            return web.json_response({'success': False, 'error': f'Internal server error: {str(e)}'}, status=500)
-
-    async def handle_content_request(self, request):
-        content_hash = request.match_info['content_hash']
-        file_path = os.path.join(self.files_dir, f"{content_hash}.dat")
-        if not os.path.exists(file_path):
-            logger.info(f"Content {content_hash} requested via HTTP not found locally.")
-            return web.json_response({'success': False, 'error': 'Content not found'}, status=404)
-        try:
-            async with aiofiles.open(file_path, 'rb') as f:
-                content = await f.read()
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                cursor.execute('UPDATE content SET last_accessed = ?, replication_count = replication_count + 1 WHERE content_hash = ?',
-                    (time.time(), content_hash))
-                conn.commit()
-            logger.info(f"Content {content_hash} served via HTTP.")
-            return web.FileResponse(file_path)
-        except Exception as e:
-            logger.error(f"Error serving content {content_hash} via HTTP: {e}")
-            return web.json_response({'success': False, 'error': f'Internal server error: {str(e)}'}, status=500)
-
-    async def handle_dns_request(self, request):
-        domain = request.match_info['domain']
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute('''SELECT d.content_hash, d.username, d.signature, d.verified, d.original_owner
-                FROM dns_records d WHERE d.domain = ? ORDER BY d.verified DESC LIMIT 1''', (domain,))
-            row = cursor.fetchone()
-            if row:
-                cursor.execute('UPDATE dns_records SET last_resolved = ? WHERE domain = ?', (time.time(), domain))
-                conn.commit()
-        if row:
-            content_hash, username, signature, verified, original_owner = row
-            logger.info(f"DNS {domain} resolved via HTTP to {content_hash}.")
-            return web.json_response({
-                'success': True, 'domain': domain, 'content_hash': content_hash,
-                'username': username, 'signature': signature, 'verified': bool(verified), 'original_owner': original_owner
-            })
-        else:
-            logger.info(f"DNS {domain} requested via HTTP not found.")
-            return web.json_response({'success': False, 'error': 'Domain not found'}, status=404)
-
-    async def handle_ddns_request(self, request):
-        domain = request.match_info['domain']
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute('SELECT ddns_hash FROM dns_records WHERE domain = ?', (domain,))
-            row = cursor.fetchone()
-        if row:
-            ddns_hash = row[0]
-            file_path = os.path.join(self.files_dir, f"{ddns_hash}.ddns")
-            if os.path.exists(file_path):
-                return web.FileResponse(file_path)
-        return web.json_response({'success': False, 'error': 'DDNS file not found'}, status=404)
-
-    async def handle_sync_content(self, request):
-        limit = int(request.query.get('limit', 100))
-        offset = int(request.query.get('offset', 0))
-        since = float(request.query.get('since', 0))
-        content_hash_param = request.query.get('content_hash')
-        content_list = []
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            if content_hash_param:
-                cursor.execute('''SELECT content_hash, title, description, mime_type, size, username,
-                    signature, public_key, verified, replication_count, timestamp FROM content WHERE content_hash = ?''',
-                    (content_hash_param,))
-            elif since > 0:
-                cursor.execute('''SELECT content_hash, title, description, mime_type, size, username,
-                    signature, public_key, verified, replication_count, timestamp FROM content
-                    WHERE timestamp > ? ORDER BY timestamp DESC LIMIT ? OFFSET ?''',
-                    (since, limit, offset))
-            else:
-                cursor.execute('''SELECT content_hash, title, description, mime_type, size, username,
-                    signature, public_key, verified, replication_count, timestamp FROM content
-                    ORDER BY replication_count DESC, last_accessed DESC LIMIT ? OFFSET ?''',
-                    (limit, offset))
-            rows = cursor.fetchall()
-        for row in rows:
-            content_list.append({
-                'content_hash': row[0], 'title': row[1], 'description': row[2], 'mime_type': row[3], 'size': row[4],
-                'username': row[5], 'signature': row[6], 'public_key': row[7], 'verified': bool(row[8]),
-                'replication_count': row[9], 'timestamp': row[10]
-            })
-        logger.info(f"Serving {len(content_list)} content items for sync (since={since}, hash={content_hash_param}).")
-        return web.json_response(content_list)
-
-    async def handle_sync_dns(self, request):
-        since = float(request.query.get('since', 0))
-        dns_list = []
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            if since > 0:
-                cursor.execute('''SELECT domain, content_hash, username, original_owner, signature, verified, last_resolved, timestamp, ddns_hash
-                    FROM dns_records WHERE timestamp > ? ORDER BY timestamp DESC''', (since,))
-            else:
-                cursor.execute('''SELECT domain, content_hash, username, original_owner, signature, verified, last_resolved, timestamp, ddns_hash
-                    FROM dns_records ORDER BY last_resolved DESC''')
-            rows = cursor.fetchall()
-        for row in rows:
-            dns_list.append({
-                'domain': row[0], 'content_hash': row[1], 'username': row[2], 'original_owner': row[3], 'signature': row[4], 'verified': bool(row[5]),
-                'last_resolved': row[6], 'timestamp': row[7], 'ddns_hash': row[8]
-            })
-        logger.info(f"Serving {len(dns_list)} DNS records for sync (since={since}).")
-        return web.json_response(dns_list)
-
-    async def handle_sync_users(self, request):
-        since = float(request.query.get('since', 0))
-        users_list = []
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            if since > 0:
-                cursor.execute('''SELECT username, reputation, last_updated, client_identifier, violation_count
-                    FROM user_reputations WHERE last_updated > ? ORDER BY reputation DESC''', (since,))
-            else:
-                cursor.execute('''SELECT username, reputation, last_updated, client_identifier, violation_count
-                    FROM user_reputations ORDER BY reputation DESC''')
-            rows = cursor.fetchall()
-        for row in rows:
-            users_list.append({
-                'username': row[0], 'reputation': row[1], 'last_updated': row[2], 'client_identifier': row[3], 'violation_count': row[4]
-            })
-        logger.info(f"Serving {len(users_list)} user reputations for sync (since={since}).")
-        return web.json_response(users_list)
-
-    async def handle_health(self, request):
-        health_data = {
-            'status': 'healthy', 'server_id': self.server_id, 'address': self.address,
-            'online_clients': len([c for c in self.connected_clients.values() if c['authenticated']]),
-            'total_users': 0, 'total_content': 0, 'total_dns': 0,
-            'uptime': time.time() - self.start_time if hasattr(self, 'start_time') else 0, 'timestamp': time.time()
+        if (!rateLimit.allowed) {
+            return res.status(429).json({
+                error: `Aguarde ${rateLimit.retryAfter} segundos antes de gerar novamente`,
+                retryAfter: rateLimit.retryAfter
+            });
         }
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute('SELECT COUNT(*) FROM users')
-            health_data['total_users'] = cursor.fetchone()[0]
-            cursor.execute('SELECT COUNT(*) FROM content')
-            health_data['total_content'] = cursor.fetchone()[0]
-            cursor.execute('SELECT COUNT(*) FROM dns_records')
-            health_data['total_dns'] = cursor.fetchone()[0]
-        return web.json_response(health_data)
 
-    async def handle_server_info(self, request):
-        return web.json_response({
-            'server_id': self.server_id, 'address': self.address,
-            'public_key': base64.b64encode(self.public_key_pem).decode('utf-8'), 'timestamp': time.time()
-        })
+        res.set({
+            'X-RateLimit-Limit': maxRequests,
+            'X-RateLimit-Remaining': rateLimit.remaining,
+            'X-RateLimit-Reset': Math.ceil(rateLimit.resetTime / 1000)
+        });
 
-    def mark_node_offline(self, node_id):
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute('UPDATE network_nodes SET is_online = 0 WHERE node_id = ?', (node_id,))
-            conn.commit()
-        logger.info(f"Node {node_id} marked offline.")
+        next();
+    };
+};
 
-    async def broadcast_network_state(self):
-        try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                cursor.execute('SELECT COUNT(*) FROM network_nodes WHERE is_online = 1')
-                online_nodes = cursor.fetchone()[0]
-                cursor.execute('SELECT COUNT(*) FROM content')
-                total_content = cursor.fetchone()[0]
-                cursor.execute('SELECT COUNT(*) FROM dns_records')
-                total_dns = cursor.fetchone()[0]
-                cursor.execute('SELECT node_type, COUNT(*) FROM network_nodes WHERE is_online = 1 GROUP BY node_type')
-                node_types = {}
-                for row in cursor.fetchall():
-                    node_types[row[0]] = row[1]
-            await self.sio.emit('network_state', {
-                'online_nodes': online_nodes, 'total_content': total_content, 'total_dns': total_dns,
-                'node_types': node_types, 'timestamp': time.time()
-            })
-            logger.debug("Network state broadcast to connected clients.")
-        except Exception as e:
-            logger.error(f"Network state broadcast error: {e}")
+setInterval(() => {
+    const now = Date.now();
+    const oneHour = 60 * 60 * 1000;
 
-    def is_valid_domain(self, domain):
-        if len(domain) < 3 or len(domain) > 63: return False
-        if not all(c.isalnum() or c == '-' or c == '.' for c in domain): return False
-        if domain.startswith('-') or domain.endswith('-'): return False
-        if '..' in domain: return False
-        return True
+    for (const [key, data] of rateLimitStore.entries()) {
+        if (now - data.lastRequest > oneHour) {
+            rateLimitStore.delete(key);
+        }
+    }
+}, 30 * 60 * 1000);
 
-    def extract_content_hash_from_ddns(self, ddns_content):
-        try:
-            lines = ddns_content.decode('utf-8').splitlines()
-            in_dns_section = False
-            for line in lines:
-                if line.strip() == '### DNS:':
-                    in_dns_section = True
-                    continue
-                if line.strip() == '### :END DNS':
-                    break
-                if in_dns_section and line.strip().startswith('# DNAME:'):
-                    parts = line.strip().split('=')
-                    if len(parts) == 2:
-                        return parts[1].strip()
-            return None
-        except Exception as e:
-            logger.error(f"Error extracting content hash from ddns: {e}")
-            return None
+const generateRandomId = () => {
+    return crypto.randomBytes(16).toString('hex').toUpperCase();
+};
 
-    async def propagate_content_to_network(self, content_hash):
-        for server_address in list(self.known_servers):
-            if server_address != self.address:
-                asyncio.create_task(self.sync_content_with_server(server_address, content_hash=content_hash))
+const generateCertificateCode = () => {
+    const parts = [];
+    for (let i = 0; i < 3; i++) {
+        let part = '';
+        for (let j = 0; j < 4; j++) {
+            part += Math.floor(Math.random() * 9) + 1;
+        }
+        parts.push(part);
+    }
+    return parts.join('-');
+};
 
-    async def propagate_dns_to_network(self, domain):
-        for server_address in list(self.known_servers):
-            if server_address != self.address:
-                asyncio.create_task(self.sync_dns_with_server(server_address, domain=domain))
+const generateUniqueId = () => {
+    return crypto.randomBytes(16).toString('hex');
+};
 
-    async def fetch_content_from_network(self, content_hash):
-        servers_to_try = []
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute('SELECT address FROM server_nodes WHERE is_active = 1 AND address != ? ORDER BY reputation DESC', (self.address,))
-            servers_to_try = [row[0] for row in cursor.fetchall()]
+const initializeCertificateTemplate = () => {
+    const templatePath = path.join(certificateTemplateDir, 'template.pdf');
+    if (!fs.existsSync(templatePath)) {
+        const doc = new PDFDocument({
+            layout: 'landscape',
+            size: 'A4'
+        });
 
-        for server in servers_to_try:
-            try:
-                success, content_data, protocol_used = await self.make_remote_request(server, f'/content/{content_hash}')
-                if success:
-                    file_path = os.path.join(self.files_dir, f"{content_hash}.dat")
+        const writeStream = fs.createWriteStream(templatePath);
+        doc.pipe(writeStream);
 
-                    async with aiofiles.open(file_path, 'wb') as f:
-                        await f.write(content_data)
+        doc.rect(0, 0, doc.page.width, doc.page.height).fill('#0f172a');
 
-                    success_meta, content_meta, _ = await self.make_remote_request_json(server, f'/sync/content', params={'content_hash': content_hash})
-                    if success_meta and content_meta and isinstance(content_meta, list) and len(content_meta) > 0:
-                        content_meta = content_meta[0]
-                        with sqlite3.connect(self.db_path) as conn:
-                            cursor = conn.cursor()
-                            cursor.execute('SELECT 1 FROM content WHERE content_hash = ?', (content_hash,))
-                            if not cursor.fetchone():
-                                cursor.execute('''INSERT INTO content
-                                    (content_hash, title, description, mime_type, size, username, signature, public_key, timestamp, file_path, verified, replication_count, last_accessed)
-                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                                    (content_hash, content_meta.get('title', 'Synced'), content_meta.get('description', 'Content synced from network'),
-                                     content_meta.get('mime_type', 'application/octet-stream'), len(content_data), content_meta.get('username', 'System'),
-                                     content_meta.get('signature', ''), content_meta.get('public_key', ''), content_meta.get('timestamp', time.time()),
-                                     file_path, content_meta.get('verified', 0), content_meta.get('replication_count', 1), time.time()))
-                            else:
-                                cursor.execute('''UPDATE content SET title=?, description=?, mime_type=?, size=?, username=?,
-                                    signature=?, public_key=?, timestamp=?, verified=?, replication_count=?, last_accessed=?
-                                    WHERE content_hash=?''',
-                                    (content_meta.get('title', 'Synced'), content_meta.get('description', 'Content synced from network'),
-                                     content_meta.get('mime_type', 'application/octet-stream'), len(content_data), content_meta.get('username', 'System'),
-                                     content_meta.get('signature', ''), content_meta.get('public_key', ''), content_meta.get('timestamp', time.time()),
-                                     content_meta.get('verified', 0), content_meta.get('replication_count', 1), time.time(), content_hash))
-                            conn.commit()
-                        logger.info(f"Content {content_hash} and metadata synced from {server} via {protocol_used}.")
-                        return True
-                    else:
-                        logger.warning(f"Could not get metadata for {content_hash} from {server}.")
+        doc.fillColor('#f1f5f9')
+           .fontSize(36)
+           .text('CERTIFICADO DE CONCLUSÃO', 0, 100, { align: 'center' });
 
-                logger.info(f"Content {content_hash} synced from {server} via {protocol_used}.")
-                return True
-            except Exception as e:
-                logger.error(f"Unexpected error fetching content {content_hash} from {server}: {e}")
+        doc.moveDown(2);
+        doc.fontSize(20)
+           .text('Conferimos a', { align: 'center' });
 
-        client_sids = []
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute('SELECT client_identifier FROM client_files WHERE content_hash = ?', (content_hash,))
-            rows = cursor.fetchall()
-            for row in rows:
-                client_identifier = row[0]
-                for sid, client in self.connected_clients.items():
-                    if client.get('client_identifier') == client_identifier and client.get('authenticated'):
-                        client_sids.append(sid)
-                        break
+        doc.moveDown();
+        doc.fontSize(28)
+           .text('{{FULL_NAME}}', { align: 'center' });
 
-        for sid in client_sids:
-            try:
-                await self.sio.emit('request_content_from_client', {'content_hash': content_hash}, room=sid)
-                await asyncio.sleep(2)
-                file_path = os.path.join(self.files_dir, f"{content_hash}.dat")
-                if os.path.exists(file_path):
-                    with sqlite3.connect(self.db_path) as conn:
-                        cursor = conn.cursor()
-                        cursor.execute('SELECT 1 FROM content WHERE content_hash = ?', (content_hash,))
-                        if cursor.fetchone():
-                            logger.info(f"Content {content_hash} received from client {sid}")
-                            return True
-            except Exception as e:
-                logger.error(f"Error requesting content from client {sid}: {e}")
+        doc.moveDown();
+        doc.fontSize(18)
+           .text('pela conclusão com êxito do tema de estudo', { align: 'center' });
 
-        return False
+        doc.moveDown();
+        doc.fontSize(24)
+           .fillColor('#6366f1')
+           .text('{{THEME_NAME}}', { align: 'center' });
 
-    async def fetch_ddns_from_network(self, domain, ddns_hash):
-        servers_to_try = []
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute('SELECT address FROM server_nodes WHERE is_active = 1 AND address != ? ORDER BY reputation DESC', (self.address,))
-            servers_to_try = [row[0] for row in cursor.fetchall()]
+        doc.moveDown(2);
+        doc.fillColor('#f1f5f9')
+           .fontSize(14)
+           .text(`Código do certificado: {{CERTIFICATE_CODE}}`, { align: 'center' });
 
-        for server in servers_to_try:
-            try:
-                success, ddns_content, protocol_used = await self.make_remote_request(server, f'/ddns/{domain}')
-                if success:
-                    file_path = os.path.join(self.files_dir, f"{ddns_hash}.ddns")
-                    async with aiofiles.open(file_path, 'wb') as f:
-                        await f.write(ddns_content)
+        doc.text(`Tag: {{TAG}}`, { align: 'center' });
+        doc.text(`Data de emissão: {{ISSUE_DATE}}`, { align: 'center' });
 
-                    logger.info(f"DDNS {domain} synced from {server} via {protocol_used}.")
-                    return True
-            except Exception as e:
-                logger.error(f"Unexpected error fetching DDNS {domain} from {server}: {e}")
+        doc.moveDown(4);
+        doc.fontSize(12)
+           .fillColor('#94a3b8')
+           .text('StudyAI - Plataforma de Estudo Inteligente', { align: 'center' });
 
-        client_sids = []
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute('SELECT client_identifier FROM client_dns_files WHERE domain = ?', (domain,))
-            rows = cursor.fetchall()
-            for row in rows:
-                client_identifier = row[0]
-                for sid, client in self.connected_clients.items():
-                    if client.get('client_identifier') == client_identifier and client.get('authenticated'):
-                        client_sids.append(sid)
-                        break
+        doc.end();
+    }
+};
 
-        for sid in client_sids:
-            try:
-                await self.sio.emit('request_ddns_from_client', {'domain': domain}, room=sid)
-                await asyncio.sleep(2)
-                file_path = os.path.join(self.files_dir, f"{ddns_hash}.ddns")
-                if os.path.exists(file_path):
-                    with sqlite3.connect(self.db_path) as conn:
-                        cursor = conn.cursor()
-                        cursor.execute('SELECT 1 FROM dns_records WHERE domain = ?', (domain,))
-                        if cursor.fetchone():
-                            logger.info(f"DDNS {domain} received from client {sid}")
-                            return True
-            except Exception as e:
-                logger.error(f"Error requesting DDNS from client {sid}: {e}")
+initializeCertificateTemplate();
 
-        return False
+db.serialize(() => {
+    db.run(`CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT UNIQUE NOT NULL,
+        username TEXT UNIQUE NOT NULL,
+        password TEXT NOT NULL,
+        email TEXT UNIQUE NOT NULL,
+        role TEXT DEFAULT 'student',
+        teacher_user_id TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        last_login DATETIME,
+        is_active INTEGER DEFAULT 1,
+        user_code TEXT UNIQUE,
+        profile_picture TEXT,
+        bio TEXT,
+        nick TEXT
+    )`);
 
-    async def resolve_dns_from_network(self, domain):
-        servers_to_try = []
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute('SELECT address FROM server_nodes WHERE is_active = 1 AND address != ? ORDER BY reputation DESC', (self.address,))
-            servers_to_try = [row[0] for row in cursor.fetchall()]
+    db.run(`CREATE TABLE IF NOT EXISTS user_profiles (
+        user_id INTEGER PRIMARY KEY,
+        full_name TEXT,
+        age INTEGER,
+        interests TEXT,
+        learning_goals TEXT,
+        preferred_learning_style TEXT,
+        time_availability INTEGER,
+        current_level TEXT DEFAULT 'beginner',
+        FOREIGN KEY(user_id) REFERENCES users(id)
+    )`);
 
-        for server in servers_to_try:
-            try:
-                success, dns_data, protocol_used = await self.make_remote_request_json(server, f'/dns/{domain}')
-                if success and dns_data.get('success'):
-                    with sqlite3.connect(self.db_path) as conn:
-                        cursor = conn.cursor()
-                        cursor.execute('''INSERT OR REPLACE INTO dns_records
-                            (domain, content_hash, username, original_owner, timestamp, signature, verified, last_resolved, ddns_hash)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                            (domain, dns_data['content_hash'], dns_data['username'], dns_data.get('original_owner', dns_data['username']),
-                             dns_data.get('timestamp', time.time()), dns_data.get('signature', ''), dns_data.get('verified', 0),
-                             time.time(), dns_data.get('ddns_hash', '')))
-                        conn.commit()
+    db.run(`CREATE TABLE IF NOT EXISTS study_themes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        theme_id TEXT UNIQUE NOT NULL,
+        user_id INTEGER NOT NULL,
+        theme_name TEXT NOT NULL,
+        description TEXT,
+        tag TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        is_active INTEGER DEFAULT 1,
+        current_topic_index INTEGER DEFAULT 0,
+        theme_code TEXT UNIQUE,
+        material_file_path TEXT,
+        material_text_content TEXT,
+        FOREIGN KEY(user_id) REFERENCES users(id)
+    )`);
 
-                    success_ddns, ddns_content, _ = await self.make_remote_request(server, f'/ddns/{domain}')
-                    if success_ddns:
-                        ddns_hash = hashlib.sha256(ddns_content).hexdigest()
-                        file_path = os.path.join(self.files_dir, f"{ddns_hash}.ddns")
-                        async with aiofiles.open(file_path, 'wb') as f:
-                            await f.write(ddns_content)
+    db.run(`CREATE TABLE IF NOT EXISTS learning_paths (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        topic_id TEXT UNIQUE NOT NULL,
+        user_id INTEGER NOT NULL,
+        theme_id INTEGER NOT NULL,
+        topic_code TEXT UNIQUE,
+        topic_name TEXT NOT NULL,
+        topic_description TEXT,
+        topic_order INTEGER NOT NULL,
+        difficulty TEXT DEFAULT 'beginner',
+        status TEXT DEFAULT 'pending',
+        progress INTEGER DEFAULT 0,
+        lessons_completed INTEGER DEFAULT 0,
+        quizzes_completed INTEGER DEFAULT 0,
+        exams_completed INTEGER DEFAULT 0,
+        completed_at DATETIME,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(user_id) REFERENCES users(id),
+        FOREIGN KEY(theme_id) REFERENCES study_themes(id)
+    )`);
 
-                    logger.info(f"DNS {domain} resolved from {server} via {protocol_used}.")
-                    return dns_data
-            except Exception as e:
-                logger.error(f"Unexpected error resolving DNS {domain} from {server}: {e}")
+    db.run(`CREATE TABLE IF NOT EXISTS study_sessions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        theme_id INTEGER NOT NULL,
+        topic_id INTEGER NOT NULL,
+        session_id TEXT UNIQUE,
+        session_type TEXT NOT NULL,
+        content_data TEXT,
+        score REAL DEFAULT 0,
+        time_spent INTEGER DEFAULT 0,
+        completed_at DATETIME,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        status TEXT DEFAULT 'completed',
+        FOREIGN KEY(user_id) REFERENCES users(id),
+        FOREIGN KEY(theme_id) REFERENCES study_themes(id),
+        FOREIGN KEY(topic_id) REFERENCES learning_paths(id)
+    )`);
 
-        return None
+    db.run(`CREATE TABLE IF NOT EXISTS assessments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        theme_id INTEGER NOT NULL,
+        topic_id INTEGER NOT NULL,
+        assessment_id TEXT UNIQUE,
+        assessment_type TEXT NOT NULL,
+        questions TEXT NOT NULL,
+        correct_answers TEXT NOT NULL,
+        user_answers TEXT,
+        score REAL DEFAULT 0,
+        total_questions INTEGER DEFAULT 0,
+        correct_count INTEGER DEFAULT 0,
+        time_spent INTEGER DEFAULT 0,
+        started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        completed_at DATETIME,
+        status TEXT DEFAULT 'in_progress',
+        analysis_data TEXT,
+        is_annulled INTEGER DEFAULT 0,
+        FOREIGN KEY(user_id) REFERENCES users(id),
+        FOREIGN KEY(theme_id) REFERENCES study_themes(id),
+        FOREIGN KEY(topic_id) REFERENCES learning_paths(id)
+    )`);
 
-    async def process_content_report(self, report_id, content_hash, reported_user, reporter):
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute('SELECT COUNT(*) FROM content_reports WHERE content_hash = ? AND reporter != ? AND resolved = 0',
-                (content_hash, reporter))
-            other_reports = cursor.fetchone()[0]
-            if other_reports >= 2:
-                logger.info(f"Report {report_id} for {content_hash} reached report threshold. Auto-processing.")
-                cursor.execute('UPDATE user_reputations SET reputation = MAX(1, reputation - 20) WHERE username = ?', (reported_user,))
-                cursor.execute('UPDATE users SET reputation = MAX(1, reputation - 20) WHERE username = ?', (reported_user,))
-                cursor.execute('UPDATE user_reputations SET reputation = MIN(100, reputation + 5) WHERE username = ?', (reporter,))
-                cursor.execute('UPDATE content_reports SET resolved = 1, resolution_type = "auto_warn" WHERE report_id = ?', (report_id,))
-                conn.commit()
-                for sid, client in self.connected_clients.items():
-                    if client.get('username') == reported_user:
-                        cursor.execute('SELECT reputation FROM user_reputations WHERE username = ?', (reported_user,))
-                        rep_row = cursor.fetchone()
-                        if rep_row:
-                            await self.sio.emit('reputation_update', {'reputation': rep_row[0]}, room=sid)
-                            await self.sio.emit('notification', {'message': 'Your reputation was reduced due to content reports.'}, room=sid)
-                logger.info(f"Report processed: {report_id} - {reported_user} penalized, {reporter} rewarded")
-            else:
-                logger.info(f"Report received: {report_id} - waiting for more reports ({other_reports+1}/3)")
+    db.run(`CREATE TABLE IF NOT EXISTS assessment_questions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        assessment_id TEXT NOT NULL,
+        question_index INTEGER NOT NULL,
+        is_annulled INTEGER DEFAULT 0,
+        validated INTEGER DEFAULT 0,
+        FOREIGN KEY(assessment_id) REFERENCES assessments(assessment_id)
+    )`);
 
-    async def sync_with_server(self, server_address):
-        if server_address in self.server_sync_tasks:
-            logger.debug(f"Sync with {server_address} already in progress.")
-            return
+    db.run(`CREATE TABLE IF NOT EXISTS progress_metrics (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        theme_id INTEGER NOT NULL,
+        topic_id INTEGER NOT NULL,
+        metric_type TEXT NOT NULL,
+        metric_value REAL NOT NULL,
+        recorded_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        notes TEXT,
+        FOREIGN KEY(user_id) REFERENCES users(id),
+        FOREIGN KEY(theme_id) REFERENCES study_themes(id),
+        FOREIGN KEY(topic_id) REFERENCES learning_paths(id)
+    )`);
 
-        try:
-            self.server_sync_tasks[server_address] = asyncio.current_task()
+    db.run(`CREATE TABLE IF NOT EXISTS error_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        theme_id INTEGER NOT NULL,
+        topic_id INTEGER NOT NULL,
+        session_id TEXT,
+        assessment_id TEXT,
+        error_type TEXT NOT NULL,
+        error_description TEXT NOT NULL,
+        correct_answer TEXT,
+        user_answer TEXT,
+        occurred_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        resolved INTEGER DEFAULT 0,
+        FOREIGN KEY(user_id) REFERENCES users(id),
+        FOREIGN KEY(theme_id) REFERENCES study_themes(id),
+        FOREIGN KEY(topic_id) REFERENCES learning_paths(id)
+    )`);
 
-            success, remote_info, protocol_used = await self.make_remote_request_json(server_address, '/server_info')
-            if success:
-                remote_server_id = remote_info['server_id']
-                remote_public_key = remote_info['public_key']
-                with sqlite3.connect(self.db_path) as conn:
-                    cursor = conn.cursor()
-                    cursor.execute('''INSERT OR REPLACE INTO server_nodes
-                        (server_id, address, public_key, last_seen, is_active, reputation, sync_priority)
-                        VALUES (?, ?, ?, ?, ?, ?, ?)''',
-                        (remote_server_id, server_address, remote_public_key, time.time(), 1, 100, 1))
-                    conn.commit()
-                self.known_servers.add(server_address)
-            else:
-                logger.warning(f"Could not get server info from {server_address}.")
-                return
+    db.run(`CREATE TABLE IF NOT EXISTS achievements (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        achievement_type TEXT NOT NULL,
+        achievement_name TEXT NOT NULL,
+        achievement_description TEXT,
+        achieved_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        points INTEGER DEFAULT 0,
+        FOREIGN KEY(user_id) REFERENCES users(id)
+    )`);
 
-            last_sync_content = 0
-            last_sync_dns = 0
-            last_sync_users = 0
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                cursor.execute('SELECT last_sync FROM server_sync_history WHERE server_address = ? AND sync_type = ?', (server_address, 'content'))
-                row = cursor.fetchone()
-                if row: last_sync_content = row[0]
-                cursor.execute('SELECT last_sync FROM server_sync_history WHERE server_address = ? AND sync_type = ?', (server_address, 'dns'))
-                row = cursor.fetchone()
-                if row: last_sync_dns = row[0]
-                cursor.execute('SELECT last_sync FROM server_sync_history WHERE server_address = ? AND sync_type = ?', (server_address, 'users'))
-                row = cursor.fetchone()
-                if row: last_sync_users = row[0]
+    db.run(`CREATE TABLE IF NOT EXISTS user_preferences (
+        user_id INTEGER PRIMARY KEY,
+        theme TEXT DEFAULT 'dark',
+        language TEXT DEFAULT 'portuguese',
+        notifications_enabled INTEGER DEFAULT 1,
+        daily_goal INTEGER DEFAULT 60,
+        weekly_goal INTEGER DEFAULT 300,
+        auto_save INTEGER DEFAULT 1,
+        difficulty_preference TEXT DEFAULT 'adaptive',
+        FOREIGN KEY(user_id) REFERENCES users(id)
+    )`);
 
-            await self.sync_content_with_server(server_address, since=last_sync_content)
-            await self.sync_dns_with_server(server_address, since=last_sync_dns)
-            await self.sync_users_with_server(server_address, since=last_sync_users)
+    db.run(`CREATE TABLE IF NOT EXISTS help_sessions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        session_id TEXT,
+        assessment_id TEXT,
+        help_count INTEGER DEFAULT 0,
+        max_help_count INTEGER DEFAULT 2,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(user_id) REFERENCES users(id)
+    )`);
 
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                cursor.execute('''INSERT OR REPLACE INTO server_sync_history
-                    (server_address, last_sync, sync_type, items_count, success)
-                    VALUES (?, ?, ?, ?, ?)''',
-                    (server_address, time.time(), 'full', 0, 1))
-                conn.commit()
+    db.run(`CREATE TABLE IF NOT EXISTS certificates (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        theme_id INTEGER NOT NULL,
+        certificate_code TEXT UNIQUE NOT NULL,
+        full_name TEXT NOT NULL,
+        theme_name TEXT NOT NULL,
+        tag TEXT,
+        issue_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+        pdf_generated INTEGER DEFAULT 0,
+        pdf_hash TEXT,
+        FOREIGN KEY(user_id) REFERENCES users(id),
+        FOREIGN KEY(theme_id) REFERENCES study_themes(id)
+    )`);
 
-            logger.info(f"Full sync with {server_address} completed successfully.")
-        except Exception as e:
-            logger.error(f"Unexpected error during sync with {server_address}: {e}")
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                cursor.execute('''INSERT OR REPLACE INTO server_sync_history
-                    (server_address, last_sync, sync_type, items_count, success)
-                    VALUES (?, ?, ?, ?, ?)''',
-                    (server_address, time.time(), 'full', 0, 0))
-                conn.commit()
-        finally:
-            if server_address in self.server_sync_tasks:
-                del self.server_sync_tasks[server_address]
+    db.run(`CREATE TABLE IF NOT EXISTS forum_categories (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        description TEXT,
+        tag TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`);
 
-    async def sync_content_with_server(self, server_address, since=0, content_hash=None):
-        try:
-            params = {}
-            if content_hash:
-                params['content_hash'] = content_hash
-            else:
-                params['since'] = since
-                params['limit'] = 100
+    db.run(`CREATE TABLE IF NOT EXISTS forum_posts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        category_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        title TEXT NOT NULL,
+        content TEXT NOT NULL,
+        is_pinned INTEGER DEFAULT 0,
+        view_count INTEGER DEFAULT 0,
+        reply_count INTEGER DEFAULT 0,
+        last_activity DATETIME DEFAULT CURRENT_TIMESTAMP,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(category_id) REFERENCES forum_categories(id),
+        FOREIGN KEY(user_id) REFERENCES users(id)
+    )`);
 
-            success, content_list, protocol_used = await self.make_remote_request_json(server_address, '/sync/content', params=params)
-            if success and isinstance(content_list, list):
-                count = 0
-                for content_item in content_list:
-                    with sqlite3.connect(self.db_path) as conn:
-                        cursor = conn.cursor()
-                        if content_item['title'].startswith('(HPS!api)'):
-                            updated = self.process_app_update(content_item, cursor)
-                            conn.commit()
-                            if not updated:
-                                continue
+    db.run(`CREATE TABLE IF NOT EXISTS forum_replies (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        post_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        content TEXT NOT NULL,
+        is_solution INTEGER DEFAULT 0,
+        grade REAL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        edited_at DATETIME,
+        is_removed INTEGER DEFAULT 0,
+        FOREIGN KEY(post_id) REFERENCES forum_posts(id),
+        FOREIGN KEY(user_id) REFERENCES users(id)
+    )`);
 
-                        cursor.execute('SELECT 1 FROM content WHERE content_hash = ?', (content_item['content_hash'],))
-                        existing_content = cursor.fetchone()
-                        if existing_content:
-                            continue
+    db.run(`CREATE TABLE IF NOT EXISTS forum_moderation (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        reply_id INTEGER NOT NULL,
+        moderator_id INTEGER NOT NULL,
+        action_type TEXT NOT NULL,
+        previous_content TEXT,
+        grade_value REAL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(reply_id) REFERENCES forum_replies(id),
+        FOREIGN KEY(moderator_id) REFERENCES users(id)
+    )`);
+});
 
-                    file_path = os.path.join(self.files_dir, f"{content_item['content_hash']}.dat")
-                    if not os.path.exists(file_path):
-                        success_content, content_data, _ = await self.make_remote_request(server_address, f'/content/{content_item["content_hash"]}')
-                        if success_content:
-                            async with aiofiles.open(file_path, 'wb') as f:
-                                await f.write(content_data)
+const authenticateToken = (req, res, next) => {
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1];
 
-                            with sqlite3.connect(self.db_path) as conn:
-                                cursor = conn.cursor()
-                                cursor.execute('''INSERT INTO content
-                                    (content_hash, title, description, mime_type, size, username, signature, public_key, timestamp, file_path, verified, replication_count, last_accessed)
-                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                                    (content_item['content_hash'], content_item.get('title', 'Synced'), content_item.get('description', 'Content synced from network'),
-                                     content_item.get('mime_type', 'application/octet-stream'), len(content_data), content_item.get('username', 'System'),
-                                     content_item.get('signature', ''), content_item.get('public_key', ''), content_item.get('timestamp', time.time()),
-                                     file_path, content_item.get('verified', 0), content_item.get('replication_count', 1), time.time()))
-                                conn.commit()
-                            count += 1
-                            logger.debug(f"Content {content_item['content_hash']} synced from {server_address} via {protocol_used}.")
+    if (!token) {
+        return res.status(401).json({ error: 'Token de acesso requerido' });
+    }
 
-                if count > 0:
-                    logger.info(f"Synced {count} content items from {server_address} via {protocol_used}.")
+    jwt.verify(token, JWT_SECRET, (err, user) => {
+        if (err) {
+            return res.status(403).json({ error: 'Token inválido' });
+        }
 
-                with sqlite3.connect(self.db_path) as conn:
-                    cursor = conn.cursor()
-                    cursor.execute('''INSERT OR REPLACE INTO server_sync_history
-                        (server_address, last_sync, sync_type, items_count, success)
-                        VALUES (?, ?, ?, ?, ?)''',
-                        (server_address, time.time(), 'content', count, 1))
-                    conn.commit()
-                return count
-            else:
-                logger.warning(f"Could not sync content from {server_address}.")
-                return 0
-        except Exception as e:
-            logger.error(f"Unexpected error syncing content from {server_address}: {e}")
-            return 0
+        db.get('SELECT id, user_id, username, role, is_active, user_code FROM users WHERE id = ?', [user.userId], (err, userData) => {
+            if (err || !userData || !userData.is_active) {
+                return res.status(403).json({ error: 'Usuário não encontrado ou inativo' });
+            }
+            req.user = userData;
+            next();
+        });
+    });
+};
 
-    async def sync_dns_with_server(self, server_address, since=0, domain=None):
-        try:
-            if domain:
-                success, dns_data, protocol_used = await self.make_remote_request_json(server_address, f'/dns/{domain}')
-                if success and dns_data.get('success'):
-                    success_ddns, ddns_content, _ = await self.make_remote_request(server_address, f'/ddns/{domain}')
-                    if success_ddns:
-                        ddns_hash = hashlib.sha256(ddns_content).hexdigest()
-                        file_path = os.path.join(self.files_dir, f"{ddns_hash}.ddns")
-                        async with aiofiles.open(file_path, 'wb') as f:
-                            await f.write(ddns_content)
+const requireRole = (roles) => {
+    return (req, res, next) => {
+        if (!roles.includes(req.user.role)) {
+            return res.status(403).json({ error: 'Acesso negado' });
+        }
+        next();
+    };
+};
 
-                    with sqlite3.connect(self.db_path) as conn:
-                        cursor = conn.cursor()
-                        cursor.execute('SELECT 1 FROM dns_records WHERE domain = ?', (domain,))
-                        if not cursor.fetchone():
-                            cursor.execute('''INSERT INTO dns_records
-                                (domain, content_hash, username, original_owner, timestamp, signature, verified, last_resolved, ddns_hash)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                                (domain, dns_data['content_hash'], dns_data['username'], dns_data.get('original_owner', dns_data['username']),
-                                 dns_data.get('timestamp', time.time()), dns_data.get('signature', ''), dns_data.get('verified', 0), time.time(), ddns_hash))
-                            conn.commit()
-                            logger.info(f"DNS {domain} synced from {server_address} via {protocol_used}.")
-                            return 1
-                return 0
-            else:
-                params = {'since': since} if since > 0 else {}
-                success, dns_list, protocol_used = await self.make_remote_request_json(server_address, '/sync/dns', params=params)
-                if success and isinstance(dns_list, list):
-                    count = 0
-                    for dns_item in dns_list:
-                        with sqlite3.connect(self.db_path) as conn:
-                            cursor = conn.cursor()
-                            cursor.execute('SELECT 1 FROM dns_records WHERE domain = ?', (dns_item['domain'],))
-                            if not cursor.fetchone():
-                                success_ddns, ddns_content, _ = await self.make_remote_request(server_address, f'/ddns/{dns_item["domain"]}')
-                                if success_ddns:
-                                    ddns_hash = hashlib.sha256(ddns_content).hexdigest()
-                                    file_path = os.path.join(self.files_dir, f"{ddns_hash}.ddns")
-                                    async with aiofiles.open(file_path, 'wb') as f:
-                                        await f.write(ddns_content)
+const callAIService = (payload) => {
+    return new Promise((resolve, reject) => {
+        const pythonScriptPath = path.join(__dirname, 'ia_service.py');
+        const pythonProcess = spawn('python3', [pythonScriptPath, JSON.stringify(payload)]);
 
-                                cursor.execute('''INSERT INTO dns_records
-                                    (domain, content_hash, username, original_owner, timestamp, signature, verified, last_resolved, ddns_hash)
-                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                                    (dns_item['domain'], dns_item['content_hash'], dns_item['username'], dns_item.get('original_owner', dns_item['username']),
-                                     dns_item.get('timestamp', time.time()), dns_item.get('signature', ''), dns_item.get('verified', 0), time.time(), ddns_hash))
-                                conn.commit()
-                                count += 1
+        let result = '';
+        let error = '';
 
-                    if count > 0:
-                        logger.info(f"Synced {count} DNS records from {server_address} via {protocol_used}.")
+        pythonProcess.stdout.on('data', (data) => {
+            result += data.toString();
+        });
 
-                    with sqlite3.connect(self.db_path) as conn:
-                        cursor = conn.cursor()
-                        cursor.execute('''INSERT OR REPLACE INTO server_sync_history
-                            (server_address, last_sync, sync_type, items_count, success)
-                            VALUES (?, ?, ?, ?, ?)''',
-                            (server_address, time.time(), 'dns', count, 1))
-                        conn.commit()
-                    return count
-                else:
-                    logger.warning(f"Could not sync DNS from {server_address}.")
-                    return 0
-        except Exception as e:
-            logger.error(f"Unexpected error syncing DNS from {server_address}: {e}")
-            return 0
+        pythonProcess.stderr.on('data', (data) => {
+            error += data.toString();
+        });
 
-    async def sync_users_with_server(self, server_address, since=0):
-        try:
-            params = {'since': since} if since > 0 else {}
-            success, users_list, protocol_used = await self.make_remote_request_json(server_address, '/sync/users', params=params)
-            if success and isinstance(users_list, list):
-                count = 0
-                for user_item in users_list:
-                    with sqlite3.connect(self.db_path) as conn:
-                        cursor = conn.cursor()
-                        cursor.execute('SELECT reputation FROM user_reputations WHERE username = ?', (user_item['username'],))
-                        row = cursor.fetchone()
-                        if row:
-                            current_reputation = row[0]
-                            if user_item['last_updated'] > since:
-                                cursor.execute('UPDATE user_reputations SET reputation = ?, last_updated = ?, client_identifier = ?, violation_count = ? WHERE username = ?',
-                                    (user_item['reputation'], user_item['last_updated'], user_item.get('client_identifier', ''), user_item.get('violation_count', 0), user_item['username']))
-                                cursor.execute('UPDATE users SET reputation = ? WHERE username = ?', (user_item['reputation'], user_item['username']))
-                                count += 1
-                        else:
-                            cursor.execute('''INSERT INTO user_reputations
-                                (username, reputation, last_updated, client_identifier, violation_count)
-                                VALUES (?, ?, ?, ?, ?)''',
-                                (user_item['username'], user_item['reputation'], user_item['last_updated'], user_item.get('client_identifier', ''), user_item.get('violation_count', 0)))
-                            cursor.execute('INSERT OR IGNORE INTO users (username, password_hash, public_key, created_at, last_login, reputation, client_identifier, last_activity) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-                                (user_item['username'], '', '', time.time(), time.time(), user_item['reputation'], user_item.get('client_identifier', ''), time.time()))
-                            count += 1
-                        conn.commit()
+        pythonProcess.on('close', (code) => {
+            if (code !== 0) {
+                reject(new Error(`Python process error: ${error}`));
+                return;
+            }
+            try {
+                const parsedResult = JSON.parse(result);
+                resolve(parsedResult);
+            } catch (e) {
+                reject(new Error('Failed to parse AI response: ' + e.message + ' - Response: ' + result));
+            }
+        });
+    });
+};
 
-                if count > 0:
-                    logger.info(f"Synced {count} user reputations from {server_address} via {protocol_used}.")
+const calculateUserLevel = (userId) => {
+    return new Promise((resolve) => {
+        db.get(`
+            SELECT AVG(score) as avg_score, COUNT(*) as assessment_count
+            FROM assessments
+            WHERE user_id = ? AND status = 'completed' AND is_annulled = 0
+        `, [userId], (err, result) => {
+            if (err || !result.assessment_count) {
+                resolve('beginner');
+                return;
+            }
 
-                with sqlite3.connect(self.db_path) as conn:
-                    cursor = conn.cursor()
-                    cursor.execute('''INSERT OR REPLACE INTO server_sync_history
-                        (server_address, last_sync, sync_type, items_count, success)
-                        VALUES (?, ?, ?, ?, ?)''',
-                        (server_address, time.time(), 'users', count, 1))
-                    conn.commit()
-                return count
-            else:
-                logger.warning(f"Could not sync users from {server_address}.")
-                return 0
-        except Exception as e:
-            logger.error(f"Unexpected error syncing users from {server_address}: {e}")
-            return 0
+            const avgScore = result.avg_score;
+            let level = 'beginner';
 
-    async def sync_with_network(self):
-        logger.info("Starting network synchronization...")
-        tasks = []
-        for server_address in list(self.known_servers):
-            if server_address != self.address:
-                tasks.append(asyncio.create_task(self.sync_with_server(server_address)))
+            if (avgScore >= 90 && result.assessment_count >= 10) level = 'expert';
+            else if (avgScore >= 80 && result.assessment_count >= 5) level = 'advanced';
+            else if (avgScore >= 70 && result.assessment_count >= 3) level = 'intermediate';
+            else if (avgScore >= 60) level = 'elementary';
 
-        if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
-        logger.info("Network synchronization completed.")
+            resolve(level);
+        });
+    });
+};
 
-    async def select_backup_server(self):
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute('SELECT address, reputation FROM server_nodes WHERE is_active = 1 AND address != ? ORDER BY reputation DESC, last_seen DESC LIMIT 1', (self.address,))
-            row = cursor.fetchone()
-            if row:
-                self.backup_server = row[0]
-                return row[0]
-        return None
+const updateUserProgress = (userId, themeId, topicId, score, metricType = 'assessment_score') => {
+    db.run(`
+        INSERT INTO progress_metrics (user_id, theme_id, topic_id, metric_type, metric_value, recorded_at)
+        VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    `, [userId, themeId, topicId, metricType, score]);
 
-    async def sync_client_files(self, client_identifier, sid):
-        try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                cursor.execute('SELECT content_hash, file_name, file_size FROM client_files WHERE client_identifier = ?', (client_identifier,))
-                client_files = [{'content_hash': row[0], 'file_name': row[1], 'file_size': row[2]} for row in cursor.fetchall()]
-                cursor.execute('SELECT domain, ddns_hash FROM client_dns_files WHERE client_identifier = ?', (client_identifier,))
-                client_dns_files = [{'domain': row[0], 'ddns_hash': row[1]} for row in cursor.fetchall()]
-            if client_files:
-                await self.sio.emit('sync_client_files', {'files': client_files}, room=sid)
-            if client_dns_files:
-                await self.sio.emit('sync_client_dns_files', {'dns_files': client_dns_files}, room=sid)
-        except Exception as e:
-            logger.error(f"Error syncing client files for {client_identifier}: {e}")
+    calculateUserLevel(userId).then(level => {
+        db.run('UPDATE user_profiles SET current_level = ? WHERE user_id = ?', [level, userId]);
+    });
+};
 
-    def get_user_reputation(self, username):
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute('SELECT reputation FROM user_reputations WHERE username = ?', (username,))
-            row = cursor.fetchone()
-            return row[0] if row else 100
+const analyzeAssessmentResults = async (userId, themeId, topicId, assessmentId, questions, userAnswers, correctAnswers) => {
+    try {
+        let questionsObj;
+        let userAnswersObj;
+        let correctAnswersObj;
 
-    async def periodic_sync(self):
-        while not self.stop_event.is_set():
-            try:
-                await asyncio.sleep(300)
-                logger.info("Starting periodic network sync...")
-                await self.sync_with_network()
-                backup_server = await self.select_backup_server()
-                if backup_server:
-                    for sid, client in self.connected_clients.items():
-                        if client.get('authenticated'):
-                            await self.sio.emit('backup_server', {'server': backup_server, 'timestamp': time.time()}, room=sid)
-                logger.info("Periodic network sync completed.")
-            except Exception as e:
-                logger.error(f"Periodic sync error: {e}")
+        try {
+            questionsObj = typeof questions === 'string' ? JSON.parse(questions) : questions;
+            userAnswersObj = typeof userAnswers === 'string' ? JSON.parse(userAnswers) : userAnswers;
+            correctAnswersObj = typeof correctAnswers === 'string' ? JSON.parse(correctAnswers) : correctAnswers;
+        } catch (parseError) {
+            console.error('Erro ao fazer parse dos dados:', parseError);
+            return {
+                erros_comuns: ["Erro na análise dos dados da avaliação"],
+                soluções: ["Recarregue a avaliação e tente novamente"],
+                recomendações: ["Entre em contato com o suporte técnico se o problema persistir"]
+            };
+        }
 
-    async def periodic_cleanup(self):
-        while not self.stop_event.is_set():
-            try:
-                await asyncio.sleep(3600)
-                logger.info("Starting periodic cleanup...")
-                now = time.time()
-                with sqlite3.connect(self.db_path) as conn:
-                    cursor = conn.cursor()
-                    cursor.execute('DELETE FROM rate_limits WHERE last_action < ?', (now - 86400,))
-                    cursor.execute('DELETE FROM pow_history WHERE timestamp < ?', (now - 604800,))
-                    cursor.execute('DELETE FROM server_sync_history WHERE last_sync < ?', (now - 2592000,))
-                    cursor.execute('DELETE FROM server_connectivity_log WHERE timestamp < ?', (now - 2592000,))
-                    cursor.execute('UPDATE network_nodes SET is_online = 0 WHERE last_seen < ?', (now - 3600,))
-                    cursor.execute('UPDATE server_nodes SET is_active = 0 WHERE last_seen < ?', (now - 86400,))
-                    cursor.execute('UPDATE known_servers SET is_active = 0 WHERE last_connected < ?', (now - 604800,))
-                    cursor.execute('DELETE FROM client_files WHERE last_sync < ?', (now - 2592000,))
-                    cursor.execute('DELETE FROM client_dns_files WHERE last_sync < ?', (now - 2592000,))
-                    conn.commit()
-                logger.info("Periodic cleanup completed.")
-            except Exception as e:
-                logger.error(f"Periodic cleanup error: {e}")
+        if (!questionsObj || typeof questionsObj !== 'object') {
+            console.error('questionsObj inválido:', questionsObj);
+            return {
+                erros_comuns: ["Dados das questões inválidos"],
+                soluções: ["Recarregue a avaliação e tente novamente"],
+                recomendações: ["Entre em contato com o suporte técnico"]
+            };
+        }
 
-    async def periodic_ping(self):
-        while not self.stop_event.is_set():
-            try:
-                await asyncio.sleep(60)
-                for server_address in list(self.known_servers):
-                    if server_address != self.address:
-                        try:
-                            success, server_info, protocol_used = await self.make_remote_request_json(server_address, '/server_info')
-                            if success:
-                                with sqlite3.connect(self.db_path) as conn:
-                                    cursor = conn.cursor()
-                                    cursor.execute('UPDATE server_nodes SET last_seen = ?, reputation = MIN(100, reputation + 1) WHERE address = ?',
-                                        (time.time(), server_address))
-                                    conn.commit()
-                            else:
-                                with sqlite3.connect(self.db_path) as conn:
-                                    cursor = conn.cursor()
-                                    cursor.execute('UPDATE server_nodes SET reputation = MAX(1, reputation - 1) WHERE address = ?',
-                                        (server_address,))
-                                    conn.commit()
-                        except Exception as e:
-                            logger.debug(f"Ping to {server_address} failed: {e}")
-            except Exception as e:
-                logger.error(f"Periodic ping error: {e}")
+        let questionsArray;
+        if (Array.isArray(questionsObj)) {
+            questionsArray = questionsObj;
+        } else if (questionsObj.perguntas && Array.isArray(questionsObj.perguntas)) {
+            questionsArray = questionsObj.perguntas;
+        } else if (questionsObj.questions && Array.isArray(questionsObj.questions)) {
+            questionsArray = questionsObj.questions;
+        } else {
+            console.error('Formato de questões não suportado:', questionsObj);
+            return {
+                erros_comuns: ["Formato das questões não é suportado"],
+                soluções: ["A avaliação precisa ser regenerada"],
+                recomendações: ["Gere uma nova avaliação para este tópico"]
+            };
+        }
 
-    async def start(self):
-        if self.is_running:
-            logger.warning("Server is already running.")
-            return
-        self.is_running = True
-        self.start_time = time.time()
-        logger.info(f"Starting HPS Server on {self.host}:{self.port}")
-        if self.ssl_cert and self.ssl_key:
-            ssl_context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
-            ssl_context.load_cert_chain(self.ssl_cert, self.ssl_key)
-            self.runner = web.AppRunner(self.app)
-            await self.runner.setup()
-            self.site = web.TCPSite(self.runner, self.host, self.port, ssl_context=ssl_context)
-            logger.info("SSL enabled for server.")
-        else:
-            self.runner = web.AppRunner(self.app)
-            await self.runner.setup()
-            self.site = web.TCPSite(self.runner, self.host, self.port)
-            logger.warning("SSL not enabled for server.")
-        await self.site.start()
-        self.start_admin_console()
-        asyncio.create_task(self.periodic_sync())
-        asyncio.create_task(self.periodic_cleanup())
-        asyncio.create_task(self.periodic_ping())
-        logger.info(f"HPS Server started successfully on {self.host}:{self.port}")
-        await self.stop_event.wait()
+        if (!Array.isArray(userAnswersObj)) {
+            userAnswersObj = [];
+        }
 
-    async def stop(self):
-        if not self.is_running:
-            logger.warning("Server is not running.")
-            return
-        logger.info("Stopping HPS Server...")
-        self.stop_event.set()
-        for task in self.server_sync_tasks.values():
-            task.cancel()
-        if self.site:
-            await self.site.stop()
-        if self.runner:
-            await self.runner.cleanup()
-        self.is_running = False
-        logger.info("HPS Server stopped.")
+        if (!Array.isArray(correctAnswersObj)) {
+            correctAnswersObj = [];
+        }
 
-if __name__ == "__main__":
-    import argparse
-    parser = argparse.ArgumentParser(description='HPS Server')
-    parser.add_argument('--db', default='hps_server.db', help='Database file path')
-    parser.add_argument('--files', default='hps_files', help='Files directory')
-    parser.add_argument('--host', default='0.0.0.0', help='Host to bind to')
-    parser.add_argument('--port', type=int, default=8080, help='Port to bind to')
-    parser.add_argument('--ssl-cert', help='SSL certificate file')
-    parser.add_argument('--ssl-key', help='SSL private key file')
-    args = parser.parse_args()
-    server = HPSServer(db_path=args.db, files_dir=args.files, host=args.host, port=args.port, ssl_cert=args.ssl_cert, ssl_key=args.ssl_key)
-    try:
-        asyncio.run(server.start())
-    except KeyboardInterrupt:
-        asyncio.run(server.stop())
-    except Exception as e:
-        logger.error(f"Server error: {e}")
-        asyncio.run(server.stop())
+        let errorAnalysis = [];
+
+        for (let i = 0; i < questionsArray.length; i++) {
+            const question = questionsArray[i];
+            const userAnswer = userAnswersObj[i];
+            const correctAnswer = correctAnswersObj[i];
+
+            if (userAnswer !== correctAnswer) {
+                const errorDetail = {
+                    question: question.pergunta || question.question || `Questão ${i + 1}`,
+                    userAnswer: userAnswer,
+                    correctAnswer: correctAnswer,
+                    options: question.opções || question.options || []
+                };
+                errorAnalysis.push(errorDetail);
+
+                db.run(`
+                    INSERT INTO error_logs (user_id, theme_id, topic_id, assessment_id, error_type, error_description, correct_answer, user_answer)
+                    VALUES (?, ?, ?, ?, 'assessment_error', ?, ?, ?)
+                `, [userId, themeId, topicId, assessmentId, `Resposta incorreta na questão ${i + 1}`, correctAnswer, userAnswer]);
+            }
+        }
+
+        if (errorAnalysis.length === 0) {
+            return {
+                erros_comuns: ["Nenhum erro identificado - excelente desempenho!"],
+                soluções: ["Continue mantendo esse nível de atenção e estudo"],
+                recomendações: ["Avance para o próximo tópico ou desafio"]
+            };
+        }
+
+        const analysisPayload = {
+            tipo: 'sumarização_de_erros',
+            conteúdo_estudo: 'Análise de erros da avaliação',
+            erros_anteriores: errorAnalysis,
+            outras_informações: {
+                assessment_id: assessmentId,
+                total_questions: questionsArray.length,
+                correct_count: questionsArray.length - errorAnalysis.length
+            }
+        };
+
+        try {
+            const aiAnalysis = await callAIService(analysisPayload);
+
+            if (aiAnalysis.error) {
+                throw new Error(aiAnalysis.error);
+            }
+
+            db.run('UPDATE assessments SET analysis_data = ? WHERE assessment_id = ?',
+                [JSON.stringify(aiAnalysis), assessmentId]);
+
+            return aiAnalysis;
+        } catch (aiError) {
+            console.error('Erro na análise da IA:', aiError);
+
+            const fallbackAnalysis = {
+                erros_comuns: errorAnalysis.map(e => `Erro na questão: "${e.question.substring(0, 100)}..."`),
+                soluções: ["Revise o conteúdo correspondente às questões erradas", "Pratique com exercícios similares"],
+                recomendações: ["Consulte o material de estudo novamente", "Peça ajuda ao professor se necessário"]
+            };
+
+            db.run('UPDATE assessments SET analysis_data = ? WHERE assessment_id = ?',
+                [JSON.stringify(fallbackAnalysis), assessmentId]);
+
+            return fallbackAnalysis;
+        }
+    } catch (error) {
+        console.error('Error in assessment analysis:', error);
+        return {
+            erros_comuns: ["Erro na análise dos resultados"],
+            soluções: ["Revise as questões manualmente"],
+            recomendações: ["Consulte o material de estudo novamente"]
+        };
+    }
+};
+
+const getCurrentLearningTopic = (userId, themeId) => {
+    return new Promise((resolve, reject) => {
+        db.get(`
+            SELECT lp.*, st.theme_name
+            FROM learning_paths lp
+            JOIN study_themes st ON lp.theme_id = st.id
+            WHERE lp.user_id = ? AND lp.theme_id = ? AND lp.status != 'completed'
+            ORDER BY lp.topic_order ASC
+            LIMIT 1
+        `, [userId, themeId], (err, topic) => {
+            if (err) reject(err);
+            else resolve(topic);
+        });
+    });
+};
+
+const updateTopicProgress = (userId, themeId, topicId, progressData) => {
+    return new Promise((resolve, reject) => {
+        const { progress, lessons_completed, quizzes_completed, exams_completed, status } = progressData;
+        const completedAt = status === 'completed' ? 'CURRENT_TIMESTAMP' : 'NULL';
+
+        db.run(`
+            UPDATE learning_paths
+            SET progress = ?, lessons_completed = ?, quizzes_completed = ?, exams_completed = ?,
+                status = ?, completed_at = ${completedAt}
+            WHERE user_id = ? AND theme_id = ? AND id = ?
+        `, [progress, lessons_completed, quizzes_completed, exams_completed, status, userId, themeId, topicId], function(err) {
+            if (err) reject(err);
+            else resolve(this.changes);
+        });
+    });
+};
+
+const getTopicProgress = (userId, themeId) => {
+    return new Promise((resolve, reject) => {
+        db.all(`
+            SELECT lp.*
+            FROM learning_paths lp
+            WHERE lp.user_id = ? AND lp.theme_id = ?
+            ORDER BY lp.topic_order ASC
+        `, [userId, themeId], (err, topics) => {
+            if (err) reject(err);
+            else resolve(topics || []);
+        });
+    });
+};
+
+const canTakeQuiz = (userId, topicId) => {
+    return new Promise((resolve) => {
+        db.get(`
+            SELECT COUNT(*) as lesson_count
+            FROM study_sessions
+            WHERE user_id = ? AND topic_id = ? AND session_type = 'lesson' AND status = 'completed'
+        `, [userId, topicId], (err, result) => {
+            resolve(result.lesson_count > 0);
+        });
+    });
+};
+
+const canTakeExam = (userId, topicId) => {
+    return new Promise((resolve) => {
+        db.get(`
+            SELECT COUNT(*) as quiz_count
+            FROM assessments
+            WHERE user_id = ? AND topic_id = ? AND assessment_type = 'quiz' AND status = 'completed' AND score >= 50 AND is_annulled = 0
+        `, [userId, topicId], (err, result) => {
+            resolve(result.quiz_count >= 3);
+        });
+    });
+};
+
+const extractCorrectAnswerLetter = (userAnswer, options) => {
+    if (!userAnswer || !options) return null;
+
+    const cleanUserAnswer = userAnswer.toString().trim();
+
+    for (let i = 0; i < options.length; i++) {
+        const option = options[i].toString().trim();
+        if (option.startsWith(cleanUserAnswer + ')') || option === cleanUserAnswer) {
+            const letter = option.split(")")[0].trim();
+            return letter;
+        }
+    }
+
+    return cleanUserAnswer.length === 1 ? cleanUserAnswer : null;
+};
+
+const getHelpSession = (userId, sessionId, assessmentId) => {
+    return new Promise((resolve) => {
+        let query = 'SELECT * FROM help_sessions WHERE user_id = ? ';
+        let params = [userId];
+
+        if (sessionId) {
+            query += ' AND session_id = ?';
+            params.push(sessionId);
+        } else if (assessmentId) {
+            query += ' AND assessment_id = ?';
+            params.push(assessmentId);
+        }
+
+        db.get(query, params, (err, result) => {
+            if (err || !result) {
+                resolve(null);
+            } else {
+                resolve(result);
+            }
+        });
+    });
+};
+
+const createHelpSession = (userId, sessionId, assessmentId, maxHelpCount = 2) => {
+    return new Promise((resolve) => {
+        db.run(`INSERT INTO help_sessions (user_id, session_id, assessment_id, max_help_count)
+                VALUES (?, ?, ?, ?)`,
+            [userId, sessionId, assessmentId, maxHelpCount], function(err) {
+            if (err) {
+                resolve(null);
+            } else {
+                resolve({
+                    id: this.lastID,
+                    user_id: userId,
+                    session_id: sessionId,
+                    assessment_id: assessmentId,
+                    help_count: 0,
+                    max_help_count: maxHelpCount
+                });
+            }
+        });
+    });
+};
+
+const incrementHelpCount = (helpSessionId) => {
+    return new Promise((resolve) => {
+        db.run('UPDATE help_sessions SET help_count = help_count + 1 WHERE id = ?',
+            [helpSessionId], function(err) {
+            resolve(!err);
+        });
+    });
+};
+
+const generateCertificatePDF = (certificate, res) => {
+    const doc = new PDFDocument({
+        layout: 'landscape',
+        size: 'A4'
+    });
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename=certificado-${certificate.certificate_code}.pdf`);
+
+    doc.pipe(res);
+
+    doc.rect(0, 0, doc.page.width, doc.page.height).fill('#0f172a');
+
+    doc.fillColor('#f1f5f9')
+       .fontSize(36)
+       .text('CERTIFICADO DE CONCLUSÃO', 0, 100, { align: 'center' });
+
+    doc.moveDown(2);
+    doc.fontSize(20)
+       .text('Conferimos a', { align: 'center' });
+
+    doc.moveDown();
+    doc.fontSize(28)
+       .text(certificate.full_name, { align: 'center' });
+
+    doc.moveDown();
+    doc.fontSize(18)
+       .text('pela conclusão com êxito do tema de estudo', { align: 'center' });
+
+    doc.moveDown();
+    doc.fontSize(24)
+       .fillColor('#6366f1')
+       .text(certificate.theme_name, { align: 'center' });
+
+    doc.moveDown(2);
+    doc.fillColor('#f1f5f9')
+       .fontSize(14)
+       .text(`Código do certificado: ${certificate.certificate_code}`, { align: 'center' });
+
+    doc.text(`Tag: ${certificate.tag}`, { align: 'center' });
+    doc.text(`Data de emissão: ${new Date(certificate.issue_date).toLocaleDateString('pt-BR')}`, { align: 'center' });
+
+    doc.moveDown(4);
+    doc.fontSize(12)
+       .fillColor('#94a3b8')
+       .text('StudyAI - Plataforma de Estudo Inteligente', { align: 'center' });
+
+    doc.end();
+};
+
+const generateCertificateHash = (certificateData) => {
+    return crypto.createHash('sha256').update(JSON.stringify({
+        certificate_code: certificateData.certificate_code,
+        full_name: certificateData.full_name,
+        theme_name: certificateData.theme_name,
+        tag: certificateData.tag,
+        issue_date: certificateData.issue_date
+    })).digest('hex');
+};
+
+const generateReportPDF = (certificate, assessments, sessions, profile, res) => {
+    const doc = new PDFDocument({
+        margins: { top: 60, bottom: 60, left: 60, right: 60 },
+        size: 'A4',
+        bufferPages: true
+    });
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename=relatorio-${certificate.theme_name.replace(/\s+/g, '-')}-${Date.now()}.pdf`);
+
+    doc.pipe(res);
+
+    doc.rect(0, 0, doc.page.width, 150).fill('#6366f1');
+    doc.rect(0, 150, doc.page.width, 10).fill('#8b5cf6');
+
+    doc.fillColor('#ffffff')
+       .fontSize(36)
+       .font('Helvetica-Bold')
+       .text('RELATÓRIO', 0, 45, { align: 'center' });
+
+    doc.fontSize(32)
+       .text('ACADÊMICO', 0, 85, { align: 'center' });
+
+    doc.fontSize(10)
+       .font('Helvetica')
+       .fillColor('#e0e7ff')
+       .text(`Gerado em ${new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}`, 0, 125, { align: 'center' });
+
+    doc.moveDown(4);
+
+    const infoBoxY = doc.y;
+    doc.roundedRect(60, infoBoxY, doc.page.width - 120, 140, 10)
+       .fill('#f8fafc');
+
+    doc.fillColor('#1e293b')
+       .fontSize(18)
+       .font('Helvetica-Bold')
+       .text('INFORMAÇÕES DO ALUNO', 80, infoBoxY + 20);
+
+    doc.moveTo(80, infoBoxY + 45)
+       .lineTo(doc.page.width - 80, infoBoxY + 45)
+       .strokeColor('#cbd5e1')
+       .lineWidth(1)
+       .stroke();
+
+    doc.fillColor('#475569')
+       .fontSize(12)
+       .font('Helvetica')
+       .text(`Nome:`, 80, infoBoxY + 60);
+    doc.fillColor('#1e293b')
+       .fontSize(12)
+       .font('Helvetica-Bold')
+       .text(`${profile?.full_name || certificate.full_name || 'N/A'}`, 180, infoBoxY + 60);
+
+    doc.fillColor('#475569')
+       .font('Helvetica')
+       .text(`Tema:`, 80, infoBoxY + 80);
+    doc.fillColor('#1e293b')
+       .font('Helvetica-Bold')
+       .text(`${certificate.theme_name}`, 180, infoBoxY + 80, { width: doc.page.width - 260 });
+
+    doc.fillColor('#475569')
+       .font('Helvetica')
+       .text(`Tag:`, 80, infoBoxY + 100);
+    doc.fillColor('#6366f1')
+       .font('Helvetica-Bold')
+       .text(`${certificate.tag || 'N/A'}`, 180, infoBoxY + 100);
+
+    doc.fillColor('#475569')
+       .font('Helvetica')
+       .text(`Certificado:`, 80, infoBoxY + 120);
+    doc.fillColor('#1e293b')
+       .font('Helvetica')
+       .fontSize(10)
+       .text(`${certificate.certificate_code}`, 180, infoBoxY + 120);
+
+    doc.y = infoBoxY + 160;
+    doc.moveDown(1);
+
+    if (assessments && assessments.length > 0) {
+        doc.fillColor('#1e293b')
+           .fontSize(20)
+           .font('Helvetica-Bold')
+           .text('RESUMO DE AVALIAÇÕES', 60, doc.y);
+
+        doc.moveTo(60, doc.y + 5)
+           .lineTo(200, doc.y + 5)
+           .strokeColor('#6366f1')
+           .lineWidth(3)
+           .stroke();
+
+        doc.moveDown(1.5);
+
+        let totalScore = 0;
+        let totalQuestions = 0;
+        let totalCorrect = 0;
+
+        assessments.forEach((assessment, index) => {
+            if (doc.y > 700) {
+                doc.addPage();
+                doc.y = 50;
+            }
+
+            doc.fillColor('#6366f1')
+               .fontSize(13)
+               .text(`${index + 1}. ${assessment.assessment_type === 'quiz' ? 'Simulado' : 'Prova'} - ${new Date(assessment.completed_at).toLocaleDateString('pt-BR')}`, 50, doc.y, { underline: true });
+
+            doc.moveDown(0.5);
+
+            doc.fillColor('#374151')
+               .fontSize(11);
+
+            const scoreColor = assessment.score >= 70 ? '#10b981' : assessment.score >= 50 ? '#f59e0b' : '#ef4444';
+            doc.fillColor(scoreColor)
+               .text(`Pontuação: ${assessment.score.toFixed(2)}%`, 50, doc.y);
+
+            doc.fillColor('#374151')
+               .text(`Questões Corretas: ${assessment.correct_count}/${assessment.total_questions}`, 50, doc.y);
+            doc.text(`Tempo Gasto: ${Math.round(assessment.time_spent / 60)} minutos`, 50, doc.y);
+
+            let questions = [];
+            let userAnswers = [];
+            let correctAnswers = [];
+
+            try {
+                questions = typeof assessment.questions === 'string' ? JSON.parse(assessment.questions) : assessment.questions;
+                userAnswers = assessment.user_answers ? (typeof assessment.user_answers === 'string' ? JSON.parse(assessment.user_answers) : assessment.user_answers) : [];
+                correctAnswers = typeof assessment.correct_answers === 'string' ? JSON.parse(assessment.correct_answers) : assessment.correct_answers;
+
+                if (!Array.isArray(questions)) {
+                    if (questions.perguntas) questions = questions.perguntas;
+                    else if (questions.questions) questions = questions.questions;
+                    else questions = [];
+                }
+
+                if (!Array.isArray(userAnswers)) userAnswers = [];
+                if (!Array.isArray(correctAnswers)) correctAnswers = [];
+            } catch (e) {
+                console.error('Erro ao processar dados da avaliação:', e);
+                questions = [];
+                userAnswers = [];
+                correctAnswers = [];
+            }
+
+            doc.moveDown(0.5);
+            doc.fontSize(10)
+               .fillColor('#6b7280')
+               .text('Detalhamento:', 50, doc.y);
+
+            questions.forEach((question, qIndex) => {
+                if (doc.y > 750) {
+                    doc.addPage();
+                    doc.y = 50;
+                }
+
+                const isCorrect = userAnswers[qIndex] === correctAnswers[qIndex];
+                const questionText = question.pergunta || question.question || `Questão ${qIndex + 1}`;
+                doc.fontSize(9)
+                   .fillColor(isCorrect ? '#10b981' : '#ef4444')
+                   .text(`Q${qIndex + 1}: ${questionText.substring(0, 80)}${questionText.length > 80 ? '...' : ''}`, 60, doc.y);
+                doc.fillColor('#6b7280')
+                   .fontSize(8)
+                   .text(`Resposta: ${userAnswers[qIndex] || 'Não respondida'} | Correta: ${correctAnswers[qIndex]}`, 60, doc.y);
+                doc.moveDown(0.3);
+            });
+
+            if (assessment.analysis_data) {
+                let analysis;
+                try {
+                    analysis = typeof assessment.analysis_data === 'string' ? JSON.parse(assessment.analysis_data) : assessment.analysis_data;
+                } catch (e) {
+                    analysis = {};
+                }
+
+                doc.moveDown(0.5);
+                doc.fontSize(10)
+                   .fillColor('#6366f1')
+                   .text('Análise:', 50, doc.y);
+
+                if (analysis.erros_comuns && Array.isArray(analysis.erros_comuns) && analysis.erros_comuns.length > 0) {
+                    doc.fillColor('#ef4444')
+                       .fontSize(9)
+                       .text('Erros Comuns:', 60, doc.y);
+                    analysis.erros_comuns.forEach(erro => {
+                        doc.fillColor('#6b7280')
+                           .fontSize(8)
+                           .text(`• ${erro.substring(0, 100)}${erro.length > 100 ? '...' : ''}`, 70, doc.y);
+                        doc.moveDown(0.2);
+                    });
+                }
+
+                if (analysis.soluções && Array.isArray(analysis.soluções) && analysis.soluções.length > 0) {
+                    doc.moveDown(0.3);
+                    doc.fillColor('#10b981')
+                       .fontSize(9)
+                       .text('Sugestões:', 60, doc.y);
+                    analysis.soluções.forEach(solucao => {
+                        doc.fillColor('#6b7280')
+                           .fontSize(8)
+                           .text(`• ${solucao.substring(0, 100)}${solucao.length > 100 ? '...' : ''}`, 70, doc.y);
+                        doc.moveDown(0.2);
+                    });
+                }
+            }
+
+            totalScore += assessment.score;
+            totalQuestions += assessment.total_questions;
+            totalCorrect += assessment.correct_count;
+
+            doc.moveDown(1);
+        });
+
+        if (assessments.length > 0) {
+            if (doc.y > 700) {
+                doc.addPage();
+                doc.y = 50;
+            }
+
+            doc.moveDown(1);
+
+            const statsY = doc.y;
+            doc.roundedRect(60, statsY, doc.page.width - 120, 140, 10)
+               .fill('#f0f9ff');
+
+            doc.fillColor('#1e293b')
+               .fontSize(18)
+               .font('Helvetica-Bold')
+               .text('ESTATÍSTICAS GERAIS', 80, statsY + 20);
+
+            doc.moveTo(80, statsY + 45)
+               .lineTo(doc.page.width - 80, statsY + 45)
+               .strokeColor('#bae6fd')
+               .lineWidth(1)
+               .stroke();
+
+            const avgScore = (totalScore / assessments.length).toFixed(2);
+            const successRate = ((totalCorrect / totalQuestions) * 100).toFixed(2);
+            const totalHours = (sessions.reduce((sum, s) => sum + (s.time_spent || 0), 0) / 3600).toFixed(2);
+
+            doc.roundedRect(80, statsY + 60, 130, 60, 8)
+               .fillAndStroke('#6366f1', '#6366f1');
+            doc.fillColor('#ffffff')
+               .fontSize(24)
+               .font('Helvetica-Bold')
+               .text(`${avgScore}%`, 90, statsY + 70, { width: 110, align: 'center' });
+            doc.fontSize(10)
+               .font('Helvetica')
+               .text('Nota Média', 90, statsY + 100, { width: 110, align: 'center' });
+
+            doc.roundedRect(220, statsY + 60, 130, 60, 8)
+               .fillAndStroke('#10b981', '#10b981');
+            doc.fillColor('#ffffff')
+               .fontSize(24)
+               .font('Helvetica-Bold')
+               .text(`${successRate}%`, 230, statsY + 70, { width: 110, align: 'center' });
+            doc.fontSize(10)
+               .font('Helvetica')
+               .text('Taxa de Acerto', 230, statsY + 100, { width: 110, align: 'center' });
+
+            doc.roundedRect(360, statsY + 60, 130, 60, 8)
+               .fillAndStroke('#f59e0b', '#f59e0b');
+            doc.fillColor('#ffffff')
+               .fontSize(24)
+               .font('Helvetica-Bold')
+               .text(`${totalHours}h`, 370, statsY + 70, { width: 110, align: 'center' });
+            doc.fontSize(10)
+               .font('Helvetica')
+               .text('Tempo Total', 370, statsY + 100, { width: 110, align: 'center' });
+
+            doc.y = statsY + 155;
+        }
+    }
+
+    if (sessions && sessions.length > 0) {
+        if (doc.y > 700) {
+            doc.addPage();
+            doc.y = 50;
+        }
+
+        doc.moveDown(2);
+        doc.fillColor('#1e293b')
+           .fontSize(20)
+           .font('Helvetica-Bold')
+           .text('LIÇÕES COMPLETADAS', 60, doc.y);
+
+        doc.moveTo(60, doc.y + 5)
+           .lineTo(200, doc.y + 5)
+           .strokeColor('#10b981')
+           .lineWidth(3)
+           .stroke();
+
+        doc.moveDown(1.5);
+
+        sessions.forEach((session, index) => {
+            if (doc.y > 750) {
+                doc.addPage();
+                doc.y = 50;
+            }
+
+            doc.fillColor('#6366f1')
+               .fontSize(12)
+               .text(`${index + 1}. ${session.topic_name}`, 50, doc.y);
+
+            doc.moveDown(0.3);
+            doc.fillColor('#6b7280')
+               .fontSize(10)
+               .text(`Data: ${new Date(session.created_at).toLocaleDateString('pt-BR')} | Tempo: ${Math.round(session.time_spent / 60)} minutos`, 50, doc.y);
+
+            if (session.content_data) {
+                try {
+                    const content = typeof session.content_data === 'string' ? JSON.parse(session.content_data) : session.content_data;
+                    if (content.objetivos && Array.isArray(content.objetivos)) {
+                        doc.moveDown(0.3);
+                        doc.fillColor('#374151')
+                           .fontSize(9)
+                           .text('Objetivos:', 60, doc.y);
+                        content.objetivos.forEach(obj => {
+                            doc.fillColor('#6b7280')
+                               .fontSize(8)
+                               .text(`• ${obj}`, 70, doc.y);
+                            doc.moveDown(0.2);
+                        });
+                    }
+                } catch (e) {
+                }
+            }
+
+            doc.moveDown(0.8);
+        });
+    }
+
+    const range = doc.bufferedPageRange();
+    for (let i = range.start; i < range.start + range.count; i++) {
+        doc.switchToPage(i);
+
+        doc.rect(0, doc.page.height - 50, doc.page.width, 50)
+           .fill('#f8fafc');
+
+        doc.fillColor('#64748b')
+           .fontSize(9)
+           .font('Helvetica')
+           .text('StudyAI - Plataforma de Estudo Inteligente', 60, doc.page.height - 35);
+
+        doc.fillColor('#94a3b8')
+           .fontSize(8)
+           .text(`Página ${i + 1} de ${range.count}`, 0, doc.page.height - 35, { align: 'right', width: doc.page.width - 60 });
+    }
+
+    doc.end();
+};
+
+app.post('/register', async (req, res) => {
+    const { username, password, email, full_name, age, interests, learning_goals, preferred_learning_style, time_availability, role, teacher_id } = req.body;
+
+    if (!username || !password || !email) {
+        return res.status(400).json({ error: 'Username, password e email são obrigatórios' });
+    }
+
+    if (password.length < 8) {
+        return res.status(400).json({ error: 'A senha deve ter pelo menos 8 caracteres' });
+    }
+
+    if (age && (age < 1 || age > 125)) {
+        return res.status(400).json({ error: 'Idade deve ser entre 1 e 125 anos' });
+    }
+
+    try {
+        const hashedPassword = await bcrypt.hash(password, 12);
+        const userId = generateRandomId();
+
+        db.get("SELECT COUNT(*) as count FROM users", (err, result) => {
+            const userRole = result.count === 0 ? 'admin' : (role === 'teacher' ? 'teacher' : 'student');
+            const userCode = generateRandomId();
+
+            let teacherUserId = null;
+            if (teacher_id && userRole === 'student') {
+                teacherUserId = teacher_id;
+            }
+
+            db.run('INSERT INTO users (user_id, username, password, email, role, teacher_user_id, user_code) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                [userId, username, hashedPassword, email, userRole, teacherUserId, userCode], function(err) {
+                if (err) {
+                    return res.status(400).json({ error: 'Usuário ou email já existe' });
+                }
+
+                const dbUserId = this.lastID;
+
+                db.run(`INSERT INTO user_profiles (user_id, full_name, age, interests, learning_goals, preferred_learning_style, time_availability)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)`,
+                    [dbUserId, full_name, age, JSON.stringify(interests), JSON.stringify(learning_goals), preferred_learning_style, time_availability],
+                    (err) => {
+                    if (err) {
+                        return res.status(500).json({ error: 'Erro ao criar perfil' });
+                    }
+
+                    db.run('INSERT INTO user_preferences (user_id) VALUES (?)', [dbUserId]);
+
+                    const token = jwt.sign({ userId: dbUserId, username: username }, JWT_SECRET);
+
+                    res.status(201).json({
+                        message: 'Usuário criado com sucesso',
+                        token: token,
+                        user: {
+                            id: dbUserId,
+                            user_id: userId,
+                            username: username,
+                            email: email,
+                            role: userRole,
+                            user_code: userCode,
+                            teacher_user_id: teacherUserId
+                        }
+                    });
+                });
+            });
+        });
+    } catch (error) {
+        res.status(500).json({ error: 'Erro interno do servidor' });
+    }
+});
+
+app.post('/login', async (req, res) => {
+    const { username, password } = req.body;
+
+    console.log("BODY:", req.body);
+    console.log("HEADERS:", req.headers);
+
+    if (!username || !password) {
+        return res.status(400).json({ error: 'Username e password são obrigatórios' });
+    }
+
+    db.get('SELECT * FROM users WHERE username = ? AND is_active = 1', [username], async (err, user) => {
+        if (err) {
+            return res.status(500).json({ error: 'Erro interno do servidor' });
+        }
+
+        if (!user) {
+            return res.status(400).json({ error: 'Credenciais inválidas' });
+        }
+
+        try {
+            if (await bcrypt.compare(password, user.password)) {
+                const token = jwt.sign({ userId: user.id, username: user.username }, JWT_SECRET);
+
+                db.run('UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = ?', [user.id]);
+
+                db.get(`SELECT up.*, pref.*
+                        FROM user_profiles up
+                        LEFT JOIN user_preferences pref ON up.user_id = pref.user_id
+                        WHERE up.user_id = ?`, [user.id], (err, profile) => {
+
+                    console.log("LOGIN SUCCESS");
+                    res.json({
+                        token: token,
+                        user: {
+                            id: user.id,
+                            user_id: user.user_id,
+                            username: user.username,
+                            email: user.email,
+                            role: user.role,
+                            teacher_user_id: user.teacher_user_id,
+                            user_code: user.user_code,
+                            profile_picture: user.profile_picture,
+                            bio: user.bio,
+                            nick: user.nick,
+                            profile: profile
+                        }
+                    });
+                });
+            } else {
+                res.status(400).json({ error: 'Credenciais inválidas' });
+            }
+        } catch (error) {
+            res.status(500).json({ error: 'Erro interno do servidor' });
+        }
+    });
+});
+
+app.get('/user/profile', authenticateToken, (req, res) => {
+    db.get(`SELECT u.id, u.user_id, u.username, u.email, u.role, u.teacher_user_id, u.created_at, u.last_login, u.user_code,
+                   u.profile_picture, u.bio, u.nick,
+                   up.full_name, up.age, up.interests, up.learning_goals, up.preferred_learning_style,
+                   up.time_availability, up.current_level,
+                   pref.theme, pref.language, pref.notifications_enabled, pref.daily_goal, pref.weekly_goal,
+                   pref.auto_save, pref.difficulty_preference
+            FROM users u
+            LEFT JOIN user_profiles up ON u.id = up.user_id
+            LEFT JOIN user_preferences pref ON u.id = pref.user_id
+            WHERE u.id = ?`, [req.user.id], (err, userData) => {
+        if (err) {
+            return res.status(500).json({ error: 'Erro ao carregar perfil' });
+        }
+        res.json(userData);
+    });
+});
+
+app.put('/user/profile', authenticateToken, (req, res) => {
+    const { full_name, age, nick, bio, profile_picture, interests, learning_goals, preferred_learning_style, teacher_user_id } = req.body;
+
+    db.run(`UPDATE users SET nick = ?, bio = ?, profile_picture = ?, teacher_user_id = ? WHERE id = ?`,
+        [nick || null, bio || null, profile_picture || null, teacher_user_id || null, req.user.id], (err) => {
+        if (err) {
+            return res.status(500).json({ error: 'Erro ao atualizar perfil' });
+        }
+
+        db.run(`UPDATE user_profiles SET full_name = ?, age = ?, interests = ?, learning_goals = ?, preferred_learning_style = ? WHERE user_id = ?`,
+            [full_name, age, JSON.stringify(interests), JSON.stringify(learning_goals), preferred_learning_style, req.user.id], (err) => {
+            if (err) {
+                return res.status(500).json({ error: 'Erro ao atualizar perfil' });
+            }
+
+            res.json({ message: 'Perfil atualizado com sucesso' });
+        });
+    });
+});
+
+app.post('/themes/create', authenticateToken, upload.single('material'), async (req, res) => {
+    const { theme_name, description } = req.body;
+
+    if (!theme_name) {
+        return res.status(400).json({ error: 'Nome do tema é obrigatório' });
+    }
+
+    try {
+        const themeCode = generateRandomId();
+        const themeId = generateRandomId();
+        let materialFilePath = null;
+        let materialTextContent = null;
+
+        if (req.file) {
+            materialFilePath = req.file.path;
+            try {
+                const pdfBuffer = fs.readFileSync(materialFilePath);
+                const pdfData = await pdfParse(pdfBuffer);
+                materialTextContent = pdfData.text;
+            } catch (pdfError) {
+                console.error('Erro ao processar PDF:', pdfError);
+            }
+        }
+
+        db.run('INSERT INTO study_themes (theme_id, user_id, theme_name, description, theme_code, material_file_path, material_text_content) VALUES (?, ?, ?, ?, ?, ?, ?)',
+            [themeId, req.user.id, theme_name, description, themeCode, materialFilePath, materialTextContent], function(err) {
+            if (err) {
+                if (req.file && fs.existsSync(req.file.path)) {
+                    fs.unlinkSync(req.file.path);
+                }
+                return res.status(500).json({ error: 'Erro ao criar tema' });
+            }
+
+            const dbThemeId = this.lastID;
+
+            const studyContent = materialTextContent ? `${theme_name}\n\nMaterial Didático:\n${materialTextContent.substring(0, 5000)}` : theme_name;
+
+            const aiPayload = {
+                tipo: 'geração_de_plano_estudo',
+                conteúdo_estudo: studyContent,
+                nível_dificuldade: 'beginner',
+                outras_informações: {
+                    theme_id: dbThemeId,
+                    user_id: req.user.id,
+                    generate_tag: true,
+                    has_material: !!materialTextContent
+                }
+            };
+
+            callAIService(aiPayload).then(aiResponse => {
+                if (aiResponse.error) {
+                    console.error('Erro da IA:', aiResponse.error);
+                    return res.status(500).json({ error: 'Erro na geração do plano de estudo: ' + aiResponse.error });
+                }
+
+                if (aiResponse.tópicos && Array.isArray(aiResponse.tópicos)) {
+                    const topics = aiResponse.tópicos;
+                    const tag = aiResponse.tag || `#${theme_name.toLowerCase().replace(/\s+/g, '-')}`;
+
+                    db.run('UPDATE study_themes SET tag = ? WHERE id = ?', [tag, dbThemeId]);
+
+                    const insertStmt = db.prepare(`
+                        INSERT INTO learning_paths (topic_id, user_id, theme_id, topic_code, topic_name, topic_description, topic_order, difficulty)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    `);
+
+                    topics.forEach((topic, index) => {
+                        const topicCode = generateRandomId();
+                        const topicId = generateRandomId();
+                        insertStmt.run([topicId, req.user.id, dbThemeId, topicCode, topic.nome, topic.descrição, index, topic.dificuldade || 'beginner']);
+                    });
+
+                    insertStmt.finalize();
+
+                    db.run(`INSERT INTO forum_categories (name, description, tag) VALUES (?, ?, ?)`,
+                        [theme_name, `Discussões sobre ${theme_name}`, tag], function(err) {
+                        if (err) {
+                            console.error('Erro ao criar categoria no fórum:', err);
+                        }
+                    });
+
+                    res.json({
+                        theme_id: dbThemeId,
+                        theme_code: themeCode,
+                        theme_id_display: themeId,
+                        tag: tag,
+                        topics: topics,
+                        has_material: !!materialTextContent,
+                        message: 'Tema e plano de estudo criados com sucesso'
+                    });
+                } else {
+                    console.error('Resposta da IA inválida:', aiResponse);
+                    res.status(500).json({ error: 'Resposta da IA inválida - estrutura de tópicos não encontrada' });
+                }
+            }).catch(error => {
+                console.error('Erro na comunicação com IA:', error);
+                res.status(500).json({ error: 'Erro na comunicação com IA: ' + error.message });
+            });
+        });
+    } catch (error) {
+        console.error('Erro ao criar tema:', error);
+        if (req.file && fs.existsSync(req.file.path)) {
+            fs.unlinkSync(req.file.path);
+        }
+        res.status(500).json({ error: 'Erro interno do servidor' });
+    }
+});
+
+app.get('/themes', authenticateToken, (req, res) => {
+    db.all('SELECT *, theme_id as display_id FROM study_themes WHERE user_id = ? AND is_active = 1 ORDER BY created_at DESC',
+        [req.user.id], (err, themes) => {
+        if (err) {
+            return res.status(500).json({ error: 'Erro ao carregar temas' });
+        }
+        res.json({ themes: themes || [] });
+    });
+});
+
+app.get('/themes/ids', authenticateToken, (req, res) => {
+    db.all('SELECT id, theme_id, theme_name, theme_code FROM study_themes WHERE user_id = ? AND is_active = 1 ORDER BY theme_name',
+        [req.user.id], (err, themes) => {
+        if (err) {
+            return res.status(500).json({ error: 'Erro ao carregar IDs dos temas' });
+        }
+        res.json({ themes: themes || [] });
+    });
+});
+
+app.delete('/themes/:themeId', authenticateToken, (req, res) => {
+    const { themeId } = req.params;
+
+    db.run('DELETE FROM study_themes WHERE id = ? AND user_id = ?', [themeId, req.user.id], function(err) {
+        if (err) {
+            return res.status(500).json({ error: 'Erro ao remover tema' });
+        }
+        if (this.changes === 0) {
+            return res.status(404).json({ error: 'Tema não encontrado' });
+        }
+        res.json({ message: 'Tema removido com sucesso' });
+    });
+});
+
+app.get('/themes/:themeId/progress', authenticateToken, async (req, res) => {
+    const { themeId } = req.params;
+
+    try {
+        const topics = await getTopicProgress(req.user.id, themeId);
+        const currentTopic = await getCurrentLearningTopic(req.user.id, themeId);
+
+        if (currentTopic) {
+            const quizAvailable = await canTakeQuiz(req.user.id, currentTopic.id);
+            const examAvailable = await canTakeExam(req.user.id, currentTopic.id);
+
+            currentTopic.quiz_available = quizAvailable;
+            currentTopic.exam_available = examAvailable;
+        }
+
+        db.get('SELECT theme_id FROM study_themes WHERE id = ?', [themeId], (err, theme) => {
+            res.json({
+                theme_id: theme?.theme_id,
+                topics: topics,
+                current_topic: currentTopic
+            });
+        });
+    } catch (error) {
+        res.status(500).json({ error: 'Erro ao carregar progresso' });
+    }
+});
+
+app.get('/themes/:themeId/ids', authenticateToken, (req, res) => {
+    const { themeId } = req.params;
+
+    db.get('SELECT theme_id, theme_code FROM study_themes WHERE id = ? AND user_id = ?', [themeId, req.user.id], (err, theme) => {
+        if (err || !theme) {
+            return res.status(404).json({ error: 'Tema não encontrado' });
+        }
+
+        db.all('SELECT topic_id, topic_code, topic_name FROM learning_paths WHERE theme_id = ? AND user_id = ? ORDER BY topic_order',
+            [themeId, req.user.id], (err, topics) => {
+            if (err) {
+                return res.status(500).json({ error: 'Erro ao carregar tópicos' });
+            }
+
+            res.json({
+                theme: theme,
+                topics: topics || []
+            });
+        });
+    });
+});
+
+app.post('/study/generate-lesson', authenticateToken, rateLimitMiddleware('generate_lesson', 3 * 60 * 1000, 1), async (req, res) => {
+    const { theme_id } = req.body;
+
+    try {
+        const currentTopic = await getCurrentLearningTopic(req.user.id, theme_id);
+
+        if (!currentTopic) {
+            return res.status(400).json({ error: 'Nenhum tópico ativo encontrado' });
+        }
+
+        db.get('SELECT material_text_content FROM study_themes WHERE id = ?', [theme_id], async (err, theme) => {
+            if (err) {
+                return res.status(500).json({ error: 'Erro ao carregar tema' });
+            }
+
+            let studyContent = `${currentTopic.theme_name} (Plano de Estudo) - ${currentTopic.topic_name} - ${currentTopic.topic_description}`;
+            if (theme && theme.material_text_content) {
+                studyContent = `${studyContent}\n\nMaterial Didático:\n${theme.material_text_content.substring(0, 5000)}`;
+            }
+
+            const aiPayload = {
+                tipo: 'geração_de_lições',
+                conteúdo_estudo: studyContent,
+                nível_dificuldade: currentTopic.difficulty,
+                outras_informações: {
+                    theme_id: theme_id,
+                    topic_id: currentTopic.id,
+                    user_id: req.user.id,
+                    has_material: !!(theme && theme.material_text_content)
+                }
+            };
+
+            try {
+                const aiResponse = await callAIService(aiPayload);
+
+                if (aiResponse.error) {
+                    return res.status(500).json({ error: 'Erro na geração da lição: ' + aiResponse.error });
+                }
+
+                const sessionId = generateUniqueId();
+
+                db.run(`INSERT INTO study_sessions (user_id, theme_id, topic_id, session_id, session_type, content_data, status)
+                        VALUES (?, ?, ?, ?, 'lesson', ?, 'completed')`,
+                    [req.user.id, theme_id, currentTopic.id, sessionId, JSON.stringify(aiResponse)],
+                    async function(err) {
+                        if (err) {
+                            return res.status(500).json({ error: 'Erro ao criar sessão de estudo' });
+                        }
+
+                        await updateTopicProgress(req.user.id, theme_id, currentTopic.id, {
+                            progress: 10,
+                            lessons_completed: currentTopic.lessons_completed + 1,
+                            quizzes_completed: currentTopic.quizzes_completed,
+                            exams_completed: currentTopic.exams_completed,
+                            status: 'in_progress'
+                        });
+
+                        await createHelpSession(req.user.id, sessionId, null, 999);
+
+                        res.json({
+                            session_id: sessionId,
+                            topic: currentTopic,
+                            content: aiResponse,
+                            message: 'Lições geradas com sucesso'
+                        });
+                    });
+            } catch (error) {
+                res.status(500).json({ error: 'Erro interno do servidor: ' + error.message });
+            }
+        });
+    } catch (error) {
+        res.status(500).json({ error: 'Erro interno do servidor: ' + error.message });
+    }
+});
+
+app.post('/study/generate-quiz', authenticateToken, rateLimitMiddleware('generate_quiz', 3 * 60 * 1000, 1), async (req, res) => {
+    const { theme_id } = req.body;
+
+    try {
+        const currentTopic = await getCurrentLearningTopic(req.user.id, theme_id);
+
+        if (!currentTopic) {
+            return res.status(400).json({ error: 'Nenhum tópico ativo encontrado' });
+        }
+
+        const quizAvailable = await canTakeQuiz(req.user.id, currentTopic.id);
+        if (!quizAvailable) {
+            return res.status(400).json({ error: 'Complete pelo menos uma lição antes de fazer um simulado' });
+        }
+
+        db.get('SELECT material_text_content FROM study_themes WHERE id = ?', [theme_id], async (err, theme) => {
+            if (err) {
+                return res.status(500).json({ error: 'Erro ao carregar tema' });
+            }
+
+            let studyContent = `${currentTopic.theme_name} (Plano de Estudo) - ${currentTopic.topic_name} - ${currentTopic.topic_description}`;
+            if (theme && theme.material_text_content) {
+                studyContent = `${studyContent}\n\nMaterial Didático:\n${theme.material_text_content.substring(0, 5000)}`;
+            }
+
+            const aiPayload = {
+                tipo: 'questionamento',
+                conteúdo_estudo: studyContent,
+                nível_dificuldade: currentTopic.difficulty,
+                outras_informações: {
+                    theme_id: theme_id,
+                    topic_id: currentTopic.id,
+                    user_id: req.user.id,
+                    question_count: 5,
+                    has_material: !!(theme && theme.material_text_content)
+                }
+            };
+
+            try {
+                const aiResponse = await callAIService(aiPayload);
+
+                if (aiResponse.error) {
+                    return res.status(500).json({ error: 'Erro na geração do quiz: ' + aiResponse.error });
+                }
+
+                let questions = [];
+                if (aiResponse.perguntas && Array.isArray(aiResponse.perguntas)) {
+                    questions = aiResponse.perguntas;
+                } else if (Array.isArray(aiResponse)) {
+                    questions = aiResponse;
+                } else {
+                    return res.status(500).json({ error: 'Formato de resposta da IA inválido' });
+                }
+
+                const correctAnswers = questions.map(q => q.resposta_correta);
+                const assessmentId = generateUniqueId();
+
+                db.run(`INSERT INTO assessments (user_id, theme_id, topic_id, assessment_id, assessment_type, questions, correct_answers, total_questions)
+                        VALUES (?, ?, ?, ?, 'quiz', ?, ?, ?)`,
+                    [req.user.id, theme_id, currentTopic.id, assessmentId, JSON.stringify(questions), JSON.stringify(correctAnswers), questions.length],
+                    async function(err) {
+                        if (err) {
+                            return res.status(500).json({ error: 'Erro ao criar quiz' });
+                        }
+
+                        await createHelpSession(req.user.id, null, assessmentId, 2);
+
+                        const questionsForClient = questions.map(q => ({
+                            pergunta: q.pergunta,
+                            opções: q.opções
+                        }));
+
+                        res.json({
+                            assessment_id: assessmentId,
+                            topic: currentTopic,
+                            questions: questionsForClient,
+                            assessment_type: 'quiz',
+                            message: 'Quiz gerado com sucesso'
+                        });
+                    });
+            } catch (error) {
+                res.status(500).json({ error: 'Erro interno do servidor: ' + error.message });
+            }
+        });
+    } catch (error) {
+        res.status(500).json({ error: 'Erro interno do servidor: ' + error.message });
+    }
+});
+
+app.post('/study/generate-exam', authenticateToken, rateLimitMiddleware('generate_exam', 3 * 60 * 1000, 1), async (req, res) => {
+    const { theme_id } = req.body;
+
+    try {
+        const currentTopic = await getCurrentLearningTopic(req.user.id, theme_id);
+
+        if (!currentTopic) {
+            return res.status(400).json({ error: 'Nenhum tópico ativo encontrado' });
+        }
+
+        const examAvailable = await canTakeExam(req.user.id, currentTopic.id);
+        if (!examAvailable) {
+            return res.status(400).json({ error: 'Complete pelo menos 3 simulados com nota mínima de 50% antes de fazer a prova' });
+        }
+
+        db.get('SELECT material_text_content FROM study_themes WHERE id = ?', [theme_id], async (err, theme) => {
+            if (err) {
+                return res.status(500).json({ error: 'Erro ao carregar tema' });
+            }
+
+            let studyContent = `${currentTopic.theme_name} (Plano de Estudo) - ${currentTopic.topic_name} - ${currentTopic.topic_description}`;
+            if (theme && theme.material_text_content) {
+                studyContent = `${studyContent}\n\nMaterial Didático:\n${theme.material_text_content.substring(0, 5000)}`;
+            }
+
+            const aiPayload = {
+                tipo: 'provas',
+                conteúdo_estudo: studyContent,
+                nível_dificuldade: currentTopic.difficulty,
+                outras_informações: {
+                    theme_id: theme_id,
+                    topic_id: currentTopic.id,
+                    user_id: req.user.id,
+                    question_count: 10,
+                    has_material: !!(theme && theme.material_text_content)
+                }
+            };
+
+            try {
+                const aiResponse = await callAIService(aiPayload);
+
+                if (aiResponse.error) {
+                    return res.status(500).json({ error: 'Erro na geração do exame: ' + aiResponse.error });
+                }
+
+                let questions = [];
+                if (aiResponse.perguntas && Array.isArray(aiResponse.perguntas)) {
+                    questions = aiResponse.perguntas;
+                } else if (Array.isArray(aiResponse)) {
+                    questions = aiResponse;
+                } else {
+                    return res.status(500).json({ error: 'Formato de resposta da IA inválido' });
+                }
+
+                const correctAnswers = questions.map(q => q.resposta_correta);
+                const assessmentId = generateUniqueId();
+
+                db.run(`INSERT INTO assessments (user_id, theme_id, topic_id, assessment_id, assessment_type, questions, correct_answers, total_questions)
+                        VALUES (?, ?, ?, ?, 'exam', ?, ?, ?)`,
+                    [req.user.id, theme_id, currentTopic.id, assessmentId, JSON.stringify(questions), JSON.stringify(correctAnswers), questions.length],
+                    function(err) {
+                        if (err) {
+                            return res.status(500).json({ error: 'Erro ao criar exame' });
+                        }
+
+                        const questionsForClient = questions.map(q => ({
+                            pergunta: q.pergunta,
+                            opções: q.opções
+                        }));
+
+                        res.json({
+                            assessment_id: assessmentId,
+                            topic: currentTopic,
+                            questions: questionsForClient,
+                            assessment_type: 'exam',
+                            message: 'Exame gerado com sucesso'
+                        });
+                    });
+            } catch (error) {
+                res.status(500).json({ error: 'Erro interno do servidor: ' + error.message });
+            }
+        });
+    } catch (error) {
+        res.status(500).json({ error: 'Erro interno do servidor: ' + error.message });
+    }
+});
+
+app.post('/assessment/submit', authenticateToken, async (req, res) => {
+    const { assessment_id, answers, time_spent } = req.body;
+
+    if (!assessment_id) {
+        return res.status(400).json({ error: 'ID da avaliação é obrigatório' });
+    }
+
+    if (!Array.isArray(answers)) {
+        return res.status(400).json({ error: 'Respostas devem ser um array' });
+    }
+
+    db.get(
+      `SELECT * FROM assessments WHERE assessment_id = ? AND user_id = ?`,
+      [assessment_id, req.user.id],
+      async (err, assessment) => {
+
+        if (err || !assessment) {
+            return res.status(404).json({ error: 'Avaliação não encontrada' });
+        }
+
+        let questions;
+        let correctAnswers;
+
+        try {
+            questions = typeof assessment.questions === 'string' ? JSON.parse(assessment.questions) : assessment.questions;
+            correctAnswers = typeof assessment.correct_answers === 'string' ? JSON.parse(assessment.correct_answers) : assessment.correct_answers;
+
+            if (!Array.isArray(questions)) {
+                if (questions.perguntas && Array.isArray(questions.perguntas)) {
+                    questions = questions.perguntas;
+                } else if (questions.questions && Array.isArray(questions.questions)) {
+                    questions = questions.questions;
+                } else {
+                    questions = [];
+                }
+            }
+
+            if (!Array.isArray(correctAnswers)) {
+                correctAnswers = [];
+            }
+        } catch (parseError) {
+            console.error('Erro ao fazer parse das questões:', parseError);
+            return res.status(500).json({ error: 'Erro no formato das questões da avaliação' });
+        }
+
+        let correctCount = 0;
+
+        for (let i = 0; i < questions.length; i++) {
+            const question = questions[i];
+            const userAnswer = answers[i];
+            const correctAnswer = correctAnswers[i];
+
+            const userAnswerLetter = extractCorrectAnswerLetter(userAnswer, question.opções);
+            const correctAnswerLetter = extractCorrectAnswerLetter(correctAnswer, question.opções);
+
+            if (userAnswerLetter && correctAnswerLetter && userAnswerLetter === correctAnswerLetter) {
+                correctCount++;
+            } else {
+                db.run(`INSERT INTO error_logs (user_id, theme_id, topic_id, assessment_id, error_type, error_description, correct_answer, user_answer)
+                        VALUES (?, ?, ?, ?, 'assessment_error', ?, ?, ?)`,
+                    [req.user.id, assessment.theme_id, assessment.topic_id, assessment_id,
+                     `Resposta incorreta na questão ${i + 1}`, correctAnswer, userAnswer]);
+            }
+        }
+
+        const score = (correctCount / questions.length) * 100;
+        const passed = assessment.assessment_type === 'quiz' ? score >= 50 : score >= 70;
+
+        db.run(`UPDATE assessments
+                SET user_answers = ?, score = ?, correct_count = ?, time_spent = ?,
+                    completed_at = CURRENT_TIMESTAMP, status = 'completed'
+                WHERE assessment_id = ?`,
+            [JSON.stringify(answers), score, correctCount, time_spent, assessment_id],
+            async function(err) {
+                if (err) {
+                    return res.status(500).json({ error: 'Erro ao salvar avaliação' });
+                }
+
+                updateUserProgress(req.user.id, assessment.theme_id, assessment.topic_id, score, 'assessment_score');
+
+                const currentTopic = await getCurrentLearningTopic(req.user.id, assessment.theme_id);
+                let newProgress = currentTopic ? currentTopic.progress : 0;
+                let newQuizzesCompleted = currentTopic ? currentTopic.quizzes_completed : 0;
+                let newExamsCompleted = currentTopic ? currentTopic.exams_completed : 0;
+                let newStatus = currentTopic ? currentTopic.status : 'pending';
+
+                if (assessment.assessment_type === 'quiz' && passed) {
+                    newQuizzesCompleted = (currentTopic ? currentTopic.quizzes_completed : 0) + 1;
+                    newProgress = 10 + Math.min(30, (newQuizzesCompleted * 10));
+                } else if (assessment.assessment_type === 'exam' && passed) {
+                    newExamsCompleted = 1;
+                    newProgress = 100;
+                    newStatus = 'completed';
+
+                    db.run(`INSERT INTO achievements (user_id, achievement_type, achievement_name, achievement_description, points)
+                            VALUES (?, 'topic_completed', 'Tópico Concluído', 'Completou um tópico com sucesso', 100)`,
+                        [req.user.id]);
+
+                    const certificateCode = generateCertificateCode();
+                    db.get(`SELECT up.full_name, st.theme_name, st.tag, st.theme_id as display_theme_id
+                            FROM user_profiles up
+                            JOIN study_themes st ON st.id = ?
+                            WHERE up.user_id = ?`, [assessment.theme_id, req.user.id], (err, result) => {
+                        if (result) {
+                            const pdfHash = generateCertificateHash({
+                                certificate_code: certificateCode,
+                                full_name: result.full_name,
+                                theme_name: result.theme_name,
+                                tag: result.tag,
+                                issue_date: new Date().toISOString()
+                            });
+
+                            db.run(`INSERT INTO certificates (user_id, theme_id, certificate_code, full_name, theme_name, tag, pdf_hash)
+                                    VALUES (?, ?, ?, ?, ?, ?, ?)`,
+                                [req.user.id, assessment.theme_id, certificateCode, result.full_name, result.theme_name, result.tag, pdfHash]);
+                        }
+                    });
+                }
+
+                if (currentTopic) {
+                    await updateTopicProgress(req.user.id, assessment.theme_id, assessment.topic_id, {
+                        progress: newProgress,
+                        lessons_completed: currentTopic.lessons_completed,
+                        quizzes_completed: newQuizzesCompleted,
+                        exams_completed: newExamsCompleted,
+                        status: newStatus
+                    });
+                }
+
+                const analysis = await analyzeAssessmentResults(
+                    req.user.id,
+                    assessment.theme_id,
+                    assessment.topic_id,
+                    assessment_id,
+                    JSON.stringify(questions),
+                    JSON.stringify(answers),
+                    JSON.stringify(correctAnswers)
+                );
+
+                res.json({
+                    score: score,
+                    correct_count: correctCount,
+                    total_questions: questions.length,
+                    passed: passed,
+                    progress: newProgress,
+                    assessment_type: assessment.assessment_type,
+                    analysis: analysis,
+                    message: 'Avaliação submetida com sucesso'
+                });
+            });
+    });
+});
+
+app.post('/study/help', authenticateToken, rateLimitMiddleware('help', 30 * 1000, 1), async (req, res) => {
+    const { session_id, assessment_id, message } = req.body;
+
+    try {
+        let helpSession = await getHelpSession(req.user.id, session_id, assessment_id);
+
+        if (!helpSession) {
+            if (assessment_id) {
+                helpSession = await createHelpSession(req.user.id, null, assessment_id, 2);
+            } else if (session_id) {
+                helpSession = await createHelpSession(req.user.id, session_id, null, 999);
+            }
+        }
+
+        if (!helpSession) {
+            return res.status(500).json({ error: 'Erro ao criar sessão de ajuda' });
+        }
+
+        if (assessment_id && helpSession.help_count >= helpSession.max_help_count) {
+            return res.status(400).json({ error: 'Você já usou todas as suas ajudas para esta sessão' });
+        }
+
+        let contextData = {};
+
+        if (session_id) {
+            db.get(`SELECT ss.*, st.theme_name, lp.topic_name, lp.topic_description
+                    FROM study_sessions ss
+                    JOIN study_themes st ON ss.theme_id = st.id
+                    JOIN learning_paths lp ON ss.topic_id = lp.id
+                    WHERE ss.session_id = ? AND ss.user_id = ?`,
+                [session_id, req.user.id], (err, session) => {
+                if (session) {
+                    try {
+                        const content = typeof session.content_data === 'string' ? JSON.parse(session.content_data) : session.content_data;
+                        contextData = {
+                            tipo_sessao: 'lição',
+                            tema: session.theme_name,
+                            tópico: session.topic_name,
+                            descrição_tópico: session.topic_description,
+                            conteúdo: content
+                        };
+                    } catch (e) {
+                        contextData = {
+                            tipo_sessao: 'lição',
+                            tema: session.theme_name,
+                            tópico: session.topic_name,
+                            descrição_tópico: session.topic_description,
+                            conteúdo: {}
+                        };
+                    }
+                }
+            });
+        } else if (assessment_id) {
+            db.get(`SELECT a.*, st.theme_name, lp.topic_name, lp.topic_description
+                    FROM assessments a
+                    JOIN study_themes st ON a.theme_id = st.id
+                    JOIN learning_paths lp ON a.topic_id = lp.id
+                    WHERE a.assessment_id = ? AND a.user_id = ?`,
+                [assessment_id, req.user.id], (err, assessment) => {
+                if (assessment) {
+                    try {
+                        let questions = typeof assessment.questions === 'string' ? JSON.parse(assessment.questions) : assessment.questions;
+                        if (!Array.isArray(questions)) {
+                            if (questions.perguntas) questions = questions.perguntas;
+                            else if (questions.questions) questions = questions.questions;
+                            else questions = [];
+                        }
+
+                        let userAnswers = assessment.user_answers ? (typeof assessment.user_answers === 'string' ? JSON.parse(assessment.user_answers) : assessment.user_answers) : [];
+                        if (!Array.isArray(userAnswers)) userAnswers = [];
+
+                        contextData = {
+                            tipo_sessao: assessment.assessment_type === 'quiz' ? 'simulado' : 'prova',
+                            tema: assessment.theme_name,
+                            tópico: assessment.topic_name,
+                            descrição_tópico: assessment.topic_description,
+                            questões: questions,
+                            respostas_usuario: userAnswers
+                        };
+                    } catch (e) {
+                        contextData = {
+                            tipo_sessao: assessment.assessment_type === 'quiz' ? 'simulado' : 'prova',
+                            tema: assessment.theme_name,
+                            tópico: assessment.topic_name,
+                            descrição_tópico: assessment.topic_description,
+                            questões: [],
+                            respostas_usuario: []
+                        };
+                    }
+                }
+            });
+        }
+
+        const aiPayload = {
+            tipo: 'ajuda',
+            conteúdo_estudo: message,
+            outras_informações: {
+                contexto: contextData,
+                user_id: req.user.id,
+                ajuda_restante: helpSession.max_help_count - helpSession.help_count
+            }
+        };
+
+        const aiResponse = await callAIService(aiPayload);
+
+        if (aiResponse.error) {
+            return res.status(500).json({ error: 'Erro na geração da ajuda: ' + aiResponse.error });
+        }
+
+        await incrementHelpCount(helpSession.id);
+
+        res.json({
+            resposta: aiResponse.resposta || aiResponse,
+            ajuda_restante: helpSession.max_help_count - (helpSession.help_count + 1),
+            tipo: aiResponse.tipo || 'resposta'
+        });
+
+    } catch (error) {
+        res.status(500).json({ error: 'Erro interno do servidor: ' + error.message });
+    }
+});
+
+app.get('/study/history', authenticateToken, (req, res) => {
+    const { theme_id, limit } = req.query;
+
+    let query = `
+        SELECT ss.*, st.theme_name, lp.topic_name
+        FROM study_sessions ss
+        JOIN study_themes st ON ss.theme_id = st.id
+        JOIN learning_paths lp ON ss.topic_id = lp.id
+        WHERE ss.user_id = ?
+    `;
+
+    let params = [req.user.id];
+
+    if (theme_id) {
+        query += ' AND ss.theme_id = ?';
+        params.push(theme_id);
+    }
+
+    query += ' ORDER BY ss.created_at DESC';
+
+    if (limit) {
+        query += ' LIMIT ?';
+        params.push(parseInt(limit));
+    } else {
+        query += ' LIMIT 50';
+    }
+
+    db.all(query, params, (err, sessions) => {
+        if (err) {
+            return res.status(500).json({ error: 'Erro ao carregar histórico' });
+        }
+
+        res.json({ sessions: sessions || [] });
+    });
+});
+
+app.get('/assessment/history', authenticateToken, (req, res) => {
+    const { theme_id, limit } = req.query;
+
+    let query = `
+        SELECT a.*, st.theme_name, lp.topic_name
+        FROM assessments a
+        JOIN study_themes st ON a.theme_id = st.id
+        JOIN learning_paths lp ON a.topic_id = lp.id
+        WHERE a.user_id = ? AND a.status = 'completed' AND a.is_annulled = 0
+    `;
+
+    let params = [req.user.id];
+
+    if (theme_id) {
+        query += ' AND a.theme_id = ?';
+        params.push(theme_id);
+    }
+
+    query += ' ORDER BY a.completed_at DESC';
+
+    if (limit) {
+        query += ' LIMIT ?';
+        params.push(parseInt(limit));
+    } else {
+        query += ' LIMIT 50';
+    }
+
+    db.all(query, params, (err, assessments) => {
+        if (err) {
+            return res.status(500).json({ error: 'Erro ao carregar histórico' });
+        }
+
+        res.json({ assessments: assessments || [] });
+    });
+});
+
+app.get('/assessment/:assessmentId', authenticateToken, (req, res) => {
+    const { assessmentId } = req.params;
+
+    db.get(`SELECT a.*, st.theme_name, lp.topic_name
+            FROM assessments a
+            JOIN study_themes st ON a.theme_id = st.id
+            JOIN learning_paths lp ON a.topic_id = lp.id
+            WHERE a.assessment_id = ? AND a.user_id = ?`,
+        [assessmentId, req.user.id], (err, assessment) => {
+        if (err || !assessment) {
+            return res.status(404).json({ error: 'Avaliação não encontrada' });
+        }
+
+        let questions;
+        let userAnswers;
+        let correctAnswers;
+
+        try {
+            questions = typeof assessment.questions === 'string' ? JSON.parse(assessment.questions) : assessment.questions;
+            userAnswers = assessment.user_answers ? (typeof assessment.user_answers === 'string' ? JSON.parse(assessment.user_answers) : assessment.user_answers) : [];
+            correctAnswers = typeof assessment.correct_answers === 'string' ? JSON.parse(assessment.correct_answers) : assessment.correct_answers;
+
+            if (!Array.isArray(questions)) {
+                if (questions.perguntas && Array.isArray(questions.perguntas)) {
+                    questions = questions.perguntas;
+                } else if (questions.questions && Array.isArray(questions.questions)) {
+                    questions = questions.questions;
+                } else {
+                    questions = [];
+                }
+            }
+
+            if (!Array.isArray(userAnswers)) {
+                userAnswers = [];
+            }
+
+            if (!Array.isArray(correctAnswers)) {
+                correctAnswers = [];
+            }
+        } catch (parseError) {
+            console.error('Erro ao fazer parse dos dados da avaliação:', parseError);
+            questions = [];
+            userAnswers = [];
+            correctAnswers = [];
+        }
+
+        const questionsWithAnalysis = questions.map((q, index) => ({
+            pergunta: q.pergunta || q.question || `Questão ${index + 1}`,
+            opções: q.opções || q.options || [],
+            resposta_usuario: userAnswers[index] || null,
+            resposta_correta: correctAnswers[index],
+            correta: userAnswers[index] === correctAnswers[index]
+        }));
+
+        let analysisData = null;
+        if (assessment.analysis_data) {
+            try {
+                analysisData = typeof assessment.analysis_data === 'string' ? JSON.parse(assessment.analysis_data) : assessment.analysis_data;
+            } catch (e) {
+                analysisData = null;
+            }
+        }
+
+        res.json({
+            assessment_id: assessment.assessment_id,
+            assessment_type: assessment.assessment_type,
+            theme_name: assessment.theme_name,
+            topic_name: assessment.topic_name,
+            score: assessment.score,
+            total_questions: assessment.total_questions,
+            correct_count: assessment.correct_count,
+            time_spent: assessment.time_spent,
+            completed_at: assessment.completed_at,
+            questions: questionsWithAnalysis,
+            analysis_data: analysisData
+        });
+    });
+});
+
+app.post('/assessment/:assessmentId/annul-question', authenticateToken, requireRole(['teacher', 'admin']), (req, res) => {
+    const { assessmentId } = req.params;
+    const { question_index } = req.body;
+
+    if (question_index === undefined || question_index === null) {
+        return res.status(400).json({ error: 'Índice da questão é obrigatório' });
+    }
+
+    db.get('SELECT * FROM assessments WHERE assessment_id = ?', [assessmentId], (err, assessment) => {
+        if (err || !assessment) {
+            return res.status(404).json({ error: 'Avaliação não encontrada' });
+        }
+
+        db.run(`INSERT INTO assessment_questions (assessment_id, question_index, is_annulled)
+                VALUES (?, ?, 1)`,
+            [assessmentId, question_index], function(err) {
+            if (err) {
+                return res.status(500).json({ error: 'Erro ao anular questão' });
+            }
+
+            const newTotalQuestions = assessment.total_questions - 1;
+            const newScore = newTotalQuestions > 0 ? (assessment.correct_count / newTotalQuestions) * 100 : 0;
+
+            db.run(`UPDATE assessments
+                    SET total_questions = ?, score = ?
+                    WHERE assessment_id = ?`,
+                [newTotalQuestions, newScore, assessmentId], () => {
+                res.json({ message: 'Questão anulada com sucesso', new_score: newScore });
+            });
+        });
+    });
+});
+
+app.post('/assessment/:assessmentId/validate-question', authenticateToken, requireRole(['teacher', 'admin']), (req, res) => {
+    const { assessmentId } = req.params;
+    const { question_index } = req.body;
+
+    if (question_index === undefined || question_index === null) {
+        return res.status(400).json({ error: 'Índice da questão é obrigatório' });
+    }
+
+    db.run(`INSERT INTO assessment_questions (assessment_id, question_index, validated)
+            VALUES (?, ?, 1)`,
+        [assessmentId, question_index], function(err) {
+        if (err) {
+            return res.status(500).json({ error: 'Erro ao validar questão' });
+        }
+
+        res.json({ message: 'Questão validada com sucesso' });
+    });
+});
+
+app.post('/assessment/:assessmentId/annul', authenticateToken, requireRole(['teacher', 'admin']), (req, res) => {
+    const { assessmentId } = req.params;
+
+    db.run(`UPDATE assessments SET is_annulled = 1 WHERE assessment_id = ?`,
+        [assessmentId], function(err) {
+        if (err) {
+            return res.status(500).json({ error: 'Erro ao anular avaliação' });
+        }
+
+        res.json({ message: 'Avaliação anulada com sucesso' });
+    });
+});
+
+app.get('/dashboard/stats', authenticateToken, (req, res) => {
+    db.serialize(() => {
+        db.get(`SELECT COUNT(*) as total_sessions,
+                       SUM(time_spent) as total_study_time,
+                       AVG(score) as avg_session_score
+                FROM study_sessions
+                WHERE user_id = ? AND status = 'completed'`,
+            [req.user.id], (err, sessionStats) => {
+
+            db.get(`SELECT COUNT(*) as total_assessments,
+                           AVG(score) as avg_assessment_score,
+                           MAX(score) as best_score
+                    FROM assessments
+                    WHERE user_id = ? AND status = 'completed' AND is_annulled = 0`,
+                [req.user.id], (err, assessmentStats) => {
+
+                db.get(`SELECT COUNT(*) as total_errors
+                        FROM error_logs
+                        WHERE user_id = ? AND resolved = 0`,
+                    [req.user.id], (err, errorStats) => {
+
+                    db.get(`SELECT COUNT(*) as total_achievements,
+                                   SUM(points) as total_points
+                            FROM achievements
+                            WHERE user_id = ?`,
+                        [req.user.id], (err, achievementStats) => {
+
+                        db.get(`SELECT current_level FROM user_profiles WHERE user_id = ?`,
+                            [req.user.id], (err, levelData) => {
+
+                            db.get(`SELECT COUNT(*) as completed_topics
+                                    FROM learning_paths
+                                    WHERE user_id = ? AND status = 'completed'`,
+                                [req.user.id], (err, topicStats) => {
+
+                                db.get(`SELECT COUNT(*) as total_certificates
+                                        FROM certificates
+                                        WHERE user_id = ?`,
+                                    [req.user.id], (err, certificateStats) => {
+
+                                    res.json({
+                                        session_stats: sessionStats || {},
+                                        assessment_stats: assessmentStats || {},
+                                        error_stats: errorStats || {},
+                                        achievement_stats: achievementStats || {},
+                                        topic_stats: topicStats || {},
+                                        certificate_stats: certificateStats || {},
+                                        current_level: levelData?.current_level || 'beginner'
+                                    });
+                                });
+                            });
+                        });
+                    });
+                });
+            });
+        });
+    });
+});
+
+app.get('/certificates', authenticateToken, (req, res) => {
+    db.all(`SELECT c.*, st.theme_name, st.tag, st.theme_id as display_theme_id
+            FROM certificates c
+            JOIN study_themes st ON c.theme_id = st.id
+            WHERE c.user_id = ?
+            ORDER BY c.issue_date DESC`,
+        [req.user.id], (err, certificates) => {
+        if (err) {
+            return res.status(500).json({ error: 'Erro ao carregar certificados' });
+        }
+        res.json({ certificates: certificates || [] });
+    });
+});
+
+app.get('/certificates/download/:code', (req, res) => {
+    const { code } = req.params;
+
+    db.get(`SELECT c.*, st.theme_name, st.tag
+            FROM certificates c
+            JOIN study_themes st ON c.theme_id = st.id
+            WHERE c.certificate_code = ?`,
+        [code], (err, certificate) => {
+        if (err || !certificate) {
+            return res.status(404).json({ error: 'Certificado não encontrado' });
+        }
+
+        generateCertificatePDF(certificate, res);
+    });
+});
+
+app.get('/certificates/download-report/:code', (req, res) => {
+    const { code } = req.params;
+
+    db.get(`SELECT c.*, st.id as theme_id, st.theme_name, st.tag, st.description
+            FROM certificates c
+            JOIN study_themes st ON c.theme_id = st.id
+            WHERE c.certificate_code = ?`,
+        [code], (err, certificate) => {
+        if (err || !certificate) {
+            return res.status(404).json({ error: 'Certificado não encontrado' });
+        }
+
+        db.get(`SELECT up.* FROM user_profiles up JOIN users u ON up.user_id = u.id WHERE u.id = ?`, [certificate.user_id], (err, profile) => {
+            db.all(`SELECT a.*, st.theme_name, lp.topic_name
+                    FROM assessments a
+                    JOIN study_themes st ON a.theme_id = st.id
+                    JOIN learning_paths lp ON a.topic_id = lp.id
+                    WHERE a.theme_id = ? AND a.user_id = ? AND a.status = 'completed' AND a.is_annulled = 0
+                    ORDER BY a.completed_at DESC`,
+                [certificate.theme_id, certificate.user_id], (err, assessments) => {
+
+                db.all(`SELECT ss.*, st.theme_name, lp.topic_name
+                        FROM study_sessions ss
+                        JOIN study_themes st ON ss.theme_id = st.id
+                        JOIN learning_paths lp ON ss.topic_id = lp.id
+                        WHERE ss.theme_id = ? AND ss.user_id = ?
+                        ORDER BY ss.created_at DESC`,
+                    [certificate.theme_id, certificate.user_id], (err, sessions) => {
+
+                    generateReportPDF(certificate, assessments || [], sessions || [], profile || {}, res);
+                });
+            });
+        });
+    });
+});
+
+app.get('/certificates/verify/:code', (req, res) => {
+    const { code } = req.params;
+
+    db.get(`SELECT c.*, st.theme_name, st.tag
+            FROM certificates c
+            JOIN study_themes st ON c.theme_id = st.id
+            WHERE c.certificate_code = ?`,
+        [code], (err, certificate) => {
+        if (err || !certificate) {
+            return res.status(404).json({ error: 'Certificado não encontrado' });
+        }
+        res.json({
+            valid: true,
+            certificate: certificate
+        });
+    });
+});
+
+app.get('/certificates/search', authenticateToken, requireRole(['teacher', 'admin']), (req, res) => {
+    const { user_id, theme_id, certificate_code, start_date, end_date } = req.query;
+
+    let query = `
+        SELECT c.*, st.theme_name, st.tag, st.theme_id as display_theme_id
+        FROM certificates c
+        JOIN study_themes st ON c.theme_id = st.id
+        WHERE 1=1
+    `;
+
+    let params = [];
+
+    if (user_id) {
+        query += ' AND c.user_id = (SELECT id FROM users WHERE user_id = ?)';
+        params.push(user_id);
+    }
+
+    if (theme_id) {
+        query += ' AND st.theme_id = ?';
+        params.push(theme_id);
+    }
+
+    if (certificate_code) {
+        query += ' AND c.certificate_code = ?';
+        params.push(certificate_code);
+    }
+
+    if (start_date) {
+        query += ' AND DATE(c.issue_date) >= DATE(?)';
+        params.push(start_date);
+    }
+
+    if (end_date) {
+        query += ' AND DATE(c.issue_date) <= DATE(?)';
+        params.push(end_date);
+    }
+
+    query += ' ORDER BY c.issue_date DESC';
+
+    db.all(query, params, (err, certificates) => {
+        if (err) {
+            return res.status(500).json({ error: 'Erro na busca de certificados' });
+        }
+        res.json({ certificates: certificates || [] });
+    });
+});
+
+app.get('/forum/categories', authenticateToken, (req, res) => {
+    db.all(`SELECT fc.*,
+                   (SELECT COUNT(*) FROM forum_posts WHERE category_id = fc.id) as post_count,
+                   (SELECT COUNT(*) FROM forum_replies fr JOIN forum_posts fp ON fr.post_id = fp.id WHERE fp.category_id = fc.id) as reply_count
+            FROM forum_categories fc
+            ORDER BY fc.name`,
+        (err, categories) => {
+        if (err) {
+            return res.status(500).json({ error: 'Erro ao carregar categorias' });
+        }
+        res.json({ categories: categories || [] });
+    });
+});
+
+app.get('/forum/posts/:categoryId', authenticateToken, (req, res) => {
+    const { categoryId } = req.params;
+
+    db.all(`SELECT fp.*, u.username, u.user_id, up.full_name, u.role, u.user_code, u.profile_picture, u.nick,
+                   (SELECT COUNT(*) FROM forum_replies WHERE post_id = fp.id) as reply_count
+            FROM forum_posts fp
+            JOIN users u ON fp.user_id = u.id
+            LEFT JOIN user_profiles up ON u.id = up.user_id
+            WHERE fp.category_id = ?
+            ORDER BY fp.is_pinned DESC, fp.last_activity DESC`,
+        [categoryId], (err, posts) => {
+        if (err) {
+            return res.status(500).json({ error: 'Erro ao carregar posts' });
+        }
+        res.json({ posts: posts || [] });
+    });
+});
+
+app.get('/forum/post/:postId', authenticateToken, (req, res) => {
+    const { postId } = req.params;
+
+    db.serialize(() => {
+        db.get(`SELECT fp.*, u.username, u.user_id, up.full_name, u.role, u.user_code, u.profile_picture, u.nick
+                FROM forum_posts fp
+                JOIN users u ON fp.user_id = u.id
+                LEFT JOIN user_profiles up ON u.id = up.user_id
+                WHERE fp.id = ?`,
+            [postId], (err, post) => {
+            if (err || !post) {
+                return res.status(404).json({ error: 'Post não encontrado' });
+            }
+
+            db.run('UPDATE forum_posts SET view_count = view_count + 1 WHERE id = ?', [postId]);
+
+            db.all(`SELECT fr.*, u.username, u.user_id, up.full_name, u.role, u.user_code, u.profile_picture, u.nick
+                    FROM forum_replies fr
+                    JOIN users u ON fr.user_id = u.id
+                    LEFT JOIN user_profiles up ON u.id = up.user_id
+                    WHERE fr.post_id = ? AND fr.is_removed = 0
+                    ORDER BY fr.created_at ASC`,
+                [postId], (err, replies) => {
+                if (err) {
+                    return res.status(500).json({ error: 'Erro ao carregar respostas' });
+                }
+                res.json({ post: post, replies: replies || [] });
+            });
+        });
+    });
+});
+
+app.post('/forum/posts', authenticateToken, (req, res) => {
+    const { category_id, title, content } = req.body;
+
+    if (!category_id || !title || !content) {
+        return res.status(400).json({ error: 'Todos os campos são obrigatórios' });
+    }
+
+    db.run(`INSERT INTO forum_posts (category_id, user_id, title, content)
+            VALUES (?, ?, ?, ?)`,
+        [category_id, req.user.id, title, content], function(err) {
+        if (err) {
+            return res.status(500).json({ error: 'Erro ao criar post' });
+        }
+        res.json({ message: 'Post criado com sucesso', post_id: this.lastID });
+    });
+});
+
+app.post('/forum/replies', authenticateToken, (req, res) => {
+    const { post_id, content } = req.body;
+
+    if (!post_id || !content) {
+        return res.status(400).json({ error: 'Todos os campos são obrigatórios' });
+    }
+
+    db.serialize(() => {
+        db.run(`INSERT INTO forum_replies (post_id, user_id, content)
+                VALUES (?, ?, ?)`,
+            [post_id, req.user.id, content], function(err) {
+            if (err) {
+                return res.status(500).json({ error: 'Erro ao criar resposta' });
+            }
+
+            db.run(`UPDATE forum_posts
+                    SET reply_count = reply_count + 1, last_activity = CURRENT_TIMESTAMP
+                    WHERE id = ?`,
+                [post_id]);
+
+            res.json({ message: 'Resposta criada com sucesso', reply_id: this.lastID });
+        });
+    });
+});
+
+app.put('/forum/replies/:replyId/grade', authenticateToken, requireRole(['teacher', 'admin']), (req, res) => {
+    const { replyId } = req.params;
+    const { grade } = req.body;
+
+    if (grade === undefined || grade < 0 || grade > 10) {
+        return res.status(400).json({ error: 'Nota deve ser entre 0 e 10' });
+    }
+
+    db.serialize(() => {
+        db.run('UPDATE forum_replies SET grade = ? WHERE id = ?', [grade, replyId], function(err) {
+            if (err) {
+                return res.status(500).json({ error: 'Erro ao atribuir nota' });
+            }
+
+            db.run(`INSERT INTO forum_moderation (reply_id, moderator_id, action_type, grade_value)
+                    VALUES (?, ?, 'grade', ?)`,
+                [replyId, req.user.id, grade]);
+
+            res.json({ message: 'Nota atribuída com sucesso' });
+        });
+    });
+});
+
+app.delete('/forum/replies/:replyId', authenticateToken, requireRole(['teacher', 'admin']), (req, res) => {
+    const { replyId } = req.params;
+
+    db.serialize(() => {
+        db.get('SELECT content FROM forum_replies WHERE id = ?', [replyId], (err, reply) => {
+            if (err || !reply) {
+                return res.status(404).json({ error: 'Resposta não encontrada' });
+            }
+
+            db.run('UPDATE forum_replies SET is_removed = 1 WHERE id = ?', [replyId], function(err) {
+                if (err) {
+                    return res.status(500).json({ error: 'Erro ao remover resposta' });
+                }
+
+                db.run(`INSERT INTO forum_moderation (reply_id, moderator_id, action_type, previous_content)
+                        VALUES (?, ?, 'remove', ?)`,
+                    [replyId, req.user.id, reply.content]);
+
+                res.json({ message: 'Resposta removida com sucesso' });
+            });
+        });
+    });
+});
+
+app.put('/forum/replies/:replyId', authenticateToken, requireRole(['teacher', 'admin']), (req, res) => {
+    const { replyId } = req.params;
+    const { content } = req.body;
+
+    if (!content) {
+        return res.status(400).json({ error: 'Conteúdo é obrigatório' });
+    }
+
+    db.serialize(() => {
+        db.get('SELECT content FROM forum_replies WHERE id = ?', [replyId], (err, reply) => {
+            if (err || !reply) {
+                return res.status(404).json({ error: 'Resposta não encontrado' });
+            }
+
+            db.run('UPDATE forum_replies SET content = ?, edited_at = CURRENT_TIMESTAMP WHERE id = ?',
+                [content, replyId], function(err) {
+                if (err) {
+                    return res.status(500).json({ error: 'Erro ao editar resposta' });
+                }
+
+                db.run(`INSERT INTO forum_moderation (reply_id, moderator_id, action_type, previous_content)
+                        VALUES (?, ?, 'edit', ?)`,
+                    [replyId, req.user.id, reply.content]);
+
+                res.json({ message: 'Resposta editada com sucesso' });
+            });
+        });
+    });
+});
+
+app.get('/user/profile-public/:userId', (req, res) => {
+    const { userId } = req.params;
+
+    db.get(`SELECT u.user_id, u.username, u.nick, u.profile_picture, u.bio, u.role,
+                   up.full_name, up.current_level
+            FROM users u
+            LEFT JOIN user_profiles up ON u.id = up.user_id
+            WHERE u.user_id = ?`,
+        [userId], (err, user) => {
+        if (err || !user) {
+            return res.status(404).json({ error: 'Usuário não encontrado' });
+        }
+        res.json(user);
+    });
+});
+
+app.get('/teacher/students', authenticateToken, requireRole(['teacher', 'admin']), (req, res) => {
+    let query = '';
+    let params = [];
+
+    if (req.user.role === 'admin') {
+        query = `
+            SELECT u.id, u.user_id, u.username, u.email, u.created_at, u.user_code, u.profile_picture, u.nick,
+                   up.full_name, up.current_level,
+                   (SELECT AVG(score) FROM assessments WHERE user_id = u.id AND status = 'completed' AND is_annulled = 0) as avg_score,
+                   (SELECT COUNT(*) FROM learning_paths WHERE user_id = u.id AND status = 'completed') as completed_topics
+            FROM users u
+            LEFT JOIN user_profiles up ON u.id = up.user_id
+            WHERE u.role = 'student'
+            ORDER BY u.created_at DESC
+        `;
+    } else {
+        query = `
+            SELECT u.id, u.user_id, u.username, u.email, u.created_at, u.user_code, u.profile_picture, u.nick,
+                   up.full_name, up.current_level,
+                   (SELECT AVG(score) FROM assessments WHERE user_id = u.id AND status = 'completed' AND is_annulled = 0) as avg_score,
+                   (SELECT COUNT(*) FROM learning_paths WHERE user_id = u.id AND status = 'completed') as completed_topics
+            FROM users u
+            LEFT JOIN user_profiles up ON u.id = up.user_id
+            WHERE u.role = 'student' AND u.teacher_user_id = ?
+            ORDER BY u.created_at DESC
+        `;
+        params.push(req.user.user_id);
+    }
+
+    db.all(query, params, (err, students) => {
+        if (err) {
+            console.error('Erro ao carregar alunos:', err);
+            return res.status(500).json({ error: 'Erro ao carregar alunos' });
+        }
+        res.json({ students: students || [] });
+    });
+});
+
+app.get('/teacher/student/:studentId/interface', authenticateToken, requireRole(['teacher', 'admin']), async (req, res) => {
+    const { studentId } = req.params;
+
+    let studentQuery = '';
+    let studentParams = [];
+
+    if (req.user.role === 'admin') {
+        studentQuery = `
+            SELECT u.*, up.full_name, up.current_level
+            FROM users u
+            LEFT JOIN user_profiles up ON u.id = up.user_id
+            WHERE u.user_id = ?
+        `;
+        studentParams = [studentId];
+    } else {
+        studentQuery = `
+            SELECT u.*, up.full_name, up.current_level
+            FROM users u
+            LEFT JOIN user_profiles up ON u.id = up.user_id
+            WHERE u.user_id = ? AND u.teacher_user_id = ?
+        `;
+        studentParams = [studentId, req.user.user_id];
+    }
+
+    db.get(studentQuery, studentParams, async (err, student) => {
+        if (err || !student) {
+            return res.status(404).json({ error: 'Aluno não encontrado ou não autorizado' });
+        }
+
+        try {
+            const [themes, progress, assessments, sessions] = await Promise.all([
+                new Promise((resolve, reject) => {
+                    db.all('SELECT *, theme_id as display_id FROM study_themes WHERE user_id = ? AND is_active = 1 ORDER BY created_at DESC',
+                        [student.id], (err, themes) => {
+                        if (err) reject(err);
+                        else resolve(themes || []);
+                    });
+                }),
+                new Promise((resolve, reject) => {
+                    db.all(`
+                        SELECT st.id as theme_id, st.theme_name, st.theme_id as display_theme_id, lp.*, lp.topic_id as display_topic_id
+                        FROM study_themes st
+                        LEFT JOIN learning_paths lp ON st.id = lp.theme_id
+                        WHERE st.user_id = ?
+                        ORDER BY st.created_at DESC, lp.topic_order ASC
+                    `, [student.id], (err, topics) => {
+                        if (err) reject(err);
+                        else resolve(topics || []);
+                    });
+                }),
+                new Promise((resolve, reject) => {
+                    db.all(`
+                        SELECT a.*, st.theme_name, lp.topic_name, st.theme_id as display_theme_id
+                        FROM assessments a
+                        JOIN study_themes st ON a.theme_id = st.id
+                        JOIN learning_paths lp ON a.topic_id = lp.id
+                        WHERE a.user_id = ? AND a.status = 'completed' AND a.is_annulled = 0
+                        ORDER BY a.completed_at DESC
+                        LIMIT 10
+                    `, [student.id], (err, assessments) => {
+                        if (err) reject(err);
+                        else resolve(assessments || []);
+                    });
+                }),
+                new Promise((resolve, reject) => {
+                    db.all(`
+                        SELECT ss.*, st.theme_name, lp.topic_name, st.theme_id as display_theme_id
+                        FROM study_sessions ss
+                        JOIN study_themes st ON ss.theme_id = st.id
+                        JOIN learning_paths lp ON ss.topic_id = lp.id
+                        WHERE ss.user_id = ?
+                        ORDER BY ss.created_at DESC
+                        LIMIT 10
+                    `, [student.id], (err, sessions) => {
+                        if (err) reject(err);
+                        else resolve(sessions || []);
+                    });
+                })
+            ]);
+
+            res.json({
+                student: student,
+                themes: themes,
+                topicsByTheme: progress.reduce((acc, topic) => {
+                    if (!acc[topic.theme_id]) {
+                        acc[topic.theme_id] = [];
+                    }
+                    acc[topic.theme_id].push(topic);
+                    return acc;
+                }, {}),
+                assessments: assessments,
+                sessions: sessions
+            });
+        } catch (error) {
+            res.status(500).json({ error: 'Erro ao carregar interface do aluno' });
+        }
+    });
+});
+
+app.get('/admin/users', authenticateToken, requireRole(['admin']), (req, res) => {
+    db.get('SELECT COUNT(*) as count FROM users', (err, result) => {
+        if (err) {
+            return res.status(500).json({ error: 'Erro ao carregar estatísticas' });
+        }
+        res.json({ count: result.count });
+    });
+});
+
+app.get('/admin/teachers', authenticateToken, requireRole(['admin']), (req, res) => {
+    db.get("SELECT COUNT(*) as count FROM users WHERE role = 'teacher'", (err, result) => {
+        if (err) {
+            return res.status(500).json({ error: 'Erro ao carregar estatísticas' });
+        }
+        res.json({ count: result.count });
+    });
+});
+
+app.get('/admin/certificates', authenticateToken, requireRole(['admin']), (req, res) => {
+    db.get('SELECT COUNT(*) as count FROM certificates', (err, result) => {
+        if (err) {
+            return res.status(500).json({ error: 'Erro ao carregar estatísticas' });
+        }
+        res.json({ count: result.count });
+    });
+});
+
+app.get('/admin/assessments', authenticateToken, requireRole(['admin']), (req, res) => {
+    db.get('SELECT COUNT(*) as count FROM assessments WHERE is_annulled = 0', (err, result) => {
+        if (err) {
+            return res.status(500).json({ error: 'Erro ao carregar estatísticas' });
+        }
+        res.json({ count: result.count });
+    });
+});
+
+app.post('/admin/make-teacher', authenticateToken, requireRole(['admin']), (req, res) => {
+    const { user_id } = req.body;
+
+    if (!user_id) {
+        return res.status(400).json({ error: 'ID do usuário é obrigatório' });
+    }
+
+    db.run('UPDATE users SET role = "teacher" WHERE user_id = ?', [user_id], function(err) {
+        if (err) {
+            return res.status(500).json({ error: 'Erro ao promover usuário' });
+        }
+        if (this.changes === 0) {
+            return res.status(404).json({ error: 'Usuário não encontrado' });
+        }
+        res.json({ message: 'Usuário promovido a professor com sucesso' });
+    });
+});
+
+app.post('/admin/skip-topic', authenticateToken, requireRole(['admin']), (req, res) => {
+    const { user_id, topic_id } = req.body;
+
+    if (!user_id || !topic_id) {
+        return res.status(400).json({ error: 'ID do usuário e tópico são obrigatórios' });
+    }
+
+    db.run(`UPDATE learning_paths
+            SET progress = 100, status = 'completed', completed_at = CURRENT_TIMESTAMP
+            WHERE topic_id = ? AND user_id = (SELECT id FROM users WHERE user_id = ?)`,
+        [topic_id, user_id], function(err) {
+        if (err) {
+            return res.status(500).json({ error: 'Erro ao pular tópico' });
+        }
+        if (this.changes === 0) {
+            return res.status(404).json({ error: 'Tópico não encontrado' });
+        }
+        res.json({ message: 'Tópico pulado com sucesso' });
+    });
+});
+
+app.post('/admin/grant-certificate', authenticateToken, requireRole(['admin']), (req, res) => {
+    const { user_id, theme_id } = req.body;
+
+    if (!user_id || !theme_id) {
+        return res.status(400).json({ error: 'ID do usuário e tema são obrigatórios' });
+    }
+
+    const certificateCode = generateCertificateCode();
+
+    db.get(`SELECT up.full_name, st.theme_name, st.tag, st.theme_id as display_theme_id
+            FROM user_profiles up
+            JOIN study_themes st ON st.theme_id = ?
+            WHERE up.user_id = (SELECT id FROM users WHERE user_id = ?)`, [theme_id, user_id], (err, result) => {
+        if (err || !result) {
+            return res.status(404).json({ error: 'Usuário ou tema não encontrado' });
+        }
+
+        const pdfHash = generateCertificateHash({
+            certificate_code: certificateCode,
+            full_name: result.full_name,
+            theme_name: result.theme_name,
+            tag: result.tag,
+            issue_date: new Date().toISOString()
+        });
+
+        db.run(`INSERT INTO certificates (user_id, theme_id, certificate_code, full_name, theme_name, tag, pdf_hash)
+                VALUES ((SELECT id FROM users WHERE user_id = ?), (SELECT id FROM study_themes WHERE theme_id = ?), ?, ?, ?, ?, ?)`,
+            [user_id, theme_id, certificateCode, result.full_name, result.theme_name, result.tag, pdfHash], function(err) {
+            if (err) {
+                return res.status(500).json({ error: 'Erro ao conceder certificado' });
+            }
+            res.json({
+                message: 'Certificado concedido com sucesso',
+                certificate_code: certificateCode,
+                theme_id: result.display_theme_id
+            });
+        });
+    });
+});
+
+app.put('/user/preferences/theme', authenticateToken, (req, res) => {
+    const { theme } = req.body;
+
+    if (!theme || !['light', 'dark'].includes(theme)) {
+        return res.status(400).json({ error: 'Tema deve ser light ou dark' });
+    }
+
+    db.run('UPDATE user_preferences SET theme = ? WHERE user_id = ?', [theme, req.user.id], function(err) {
+        if (err) {
+            return res.status(500).json({ error: 'Erro ao atualizar tema' });
+        }
+        res.json({ message: 'Tema atualizado com sucesso' });
+    });
+});
+
+app.get('/user/ids', authenticateToken, (req, res) => {
+    db.get('SELECT user_id, user_code FROM users WHERE id = ?', [req.user.id], (err, user) => {
+        if (err || !user) {
+            return res.status(500).json({ error: 'Erro ao carregar IDs' });
+        }
+        res.json(user);
+    });
+});
+
+app.get('/learning-paths/ids/:themeId', authenticateToken, (req, res) => {
+    const { themeId } = req.params;
+
+    db.all('SELECT topic_id, topic_code, topic_name FROM learning_paths WHERE theme_id = ? AND user_id = ? ORDER BY topic_order',
+        [themeId, req.user.id], (err, topics) => {
+        if (err) {
+            return res.status(500).json({ error: 'Erro ao carregar IDs dos tópicos' });
+        }
+        res.json({ topics: topics || [] });
+    });
+});
+
+app.get('/', (req, res) => {
+    res.sendFile(path.join(publicDir, 'index.html'));
+});
+
+app.use((err, req, res, next) => {
+    console.error('Erro não tratado:', err);
+    res.status(500).json({ error: 'Erro interno do servidor' });
+});
+
+app.listen(PORT, () => {
+    console.log(`Servidor ASS rodando na porta ${PORT}`);
+    console.log(`Acesse: http://localhost:${PORT}`);
+});

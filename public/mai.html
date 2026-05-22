@@ -38,17 +38,7 @@
 --radius-xl: 24px;
 --touch-target: 44px;
 }
-.light-mode {
---bg-primary: #f8fafc;
---bg-secondary: #f1f5f9;
---bg-card: #ffffff;
---bg-hover: #e2e8f0;
---text-primary: #0f172a;
---text-secondary: #334155;
---text-muted: #64748b;
---border: #cbd5e1;
---shadow: rgba(0, 0, 0, 0.08);
-}
+
 * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 html, body {
 height: 100vh;
@@ -334,19 +324,19 @@ min-height: var(--touch-target);
 .option-item.correct { border-color: var(--success); background: rgba(16, 185, 129, 0.2); }
 .option-item.incorrect { border-color: var(--danger); background: rgba(239, 68, 68, 0.2); }
 .modal-overlay {
-position: fixed;
-top: 0;
-left: 0;
-right: 0;
-bottom: 0;
-background: rgba(15, 23, 42, 0.9);
-display: flex;
-align-items: center;
-justify-content: center;
-z-index: 2000;
-padding: 0.75rem;
-overflow-y: auto;
--webkit-overflow-scrolling: touch;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: var(--bg-primary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 6000;
+    padding: 0.75rem;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
 }
 .modal-content {
 background: var(--bg-card);
@@ -392,7 +382,7 @@ padding: 0.875rem 1.25rem;
 border-radius: var(--radius-lg);
 color: white;
 font-weight: 500;
-z-index: 3000;
+    z-index: 7000;
 transform: translateY(-150%);
 transition: transform 0.3s ease;
 max-width: 100%;
@@ -798,8 +788,12 @@ flex: 1; padding: 1rem; overflow-y: auto;
 max-width: 700px; margin: 0 auto; width: 100%;
 }
 .exam-progress-bar {
-height: 6px; background: var(--bg-secondary); border-radius: 3px;
-overflow: hidden; margin-bottom: 0.5rem;
+    position: sticky;
+    top: 0;
+    background: var(--bg-secondary);
+    z-index: 10;
+    height: 6px; background: var(--bg-secondary); border-radius: 3px;
+    backdrop-filter: blur(5px);
 }
 .exam-progress-fill {
 height: 100%; background: var(--gradient-primary);
@@ -1076,7 +1070,7 @@ body { font-size: 13px; }
 }
 </style>
 </head>
-<body :class="{ 'light-mode': !darkMode }">
+<body>
 <div id="app">
 <canvas id="confetti-canvas"></canvas>
 <div v-if="notification.show" class="notification" :class="[notification.type, { show: notification.show }]">
@@ -1116,7 +1110,6 @@ body { font-size: 13px; }
 </div>
 </div>
 <div class="sidebar-actions">
-<button class="sidebar-btn" @click="toggleTheme" :title="darkMode ? 'Modo Claro' : 'Modo Escuro'"><i :class="darkMode ? 'fas fa-sun' : 'fas fa-moon'"></i></button>
 <button class="sidebar-btn" @click="logout" title="Sair"><i class="fas fa-sign-out-alt"></i></button>
 </div>
 </div>
@@ -2065,7 +2058,7 @@ body { font-size: 13px; }
 <div class="exam-progress-bar">
 <div class="exam-progress-fill" :style="{ width: ((Object.keys(assessmentAnswers).length / activeAssessment.questions.length) * 100) + '%' }"></div>
 </div>
-<div class="exam-progress-text">{{ Object.keys(assessmentAnswers).length }}/{{ activeAssessment.questions.length }} respondidas</div>
+    <div class="exam-progress-text">{{ Object.keys(assessmentAnswers).length }}/{{ activeAssessment.questions.length }} respondidas ({{ activeAssessment.questions.length - Object.keys(assessmentAnswers).length }} faltando)</div>
 <div v-for="(question, qIndex) in activeAssessment.questions" :key="qIndex" class="question-card exam-question">
 <div class="question-number">Questão {{ qIndex + 1 }}</div>
 <div class="question-text">{{ question.pergunta }}</div>
@@ -2251,6 +2244,7 @@ isExamFullscreen: false,
 motivationalPhrases: ['Você consegue! 💪', 'Continue assim! 🚀', 'Está indo muito bem! ⭐', 'Não desista! 🎯', 'Foco no objetivo! 🏆', 'Cada questão te aproxima do sucesso! 📚'],
 currentPhraseIndex: 0,
 phraseTimer: null,
+    usedPhraseIndices: [],
 showCreateTheme: false,
 showCreatePost: false,
 verificationCode: '',
@@ -2481,7 +2475,7 @@ this.assessmentTimeLeft = 30 * 60;
 this.isExamFullscreen = true;
 this.showAssessmentModal = true;
 this.startAssessmentTimer();
-this.startPhraseRotation();
+
 this.showNotification('Simulado gerado com sucesso!', 'success');
 } catch (error) { this.showNotification('Erro ao gerar simulado: ' + (error.response?.data?.error || 'Erro de comunicação'), 'error'); } finally { this.loadingQuiz = false; }
 },
@@ -2496,7 +2490,7 @@ this.assessmentTimeLeft = 60 * 60;
 this.isExamFullscreen = true;
 this.showAssessmentModal = true;
 this.startAssessmentTimer();
-this.startPhraseRotation();
+
 this.showNotification('Prova gerada com sucesso!', 'success');
 } catch (error) { this.showNotification('Erro ao gerar prova: ' + (error.response?.data?.error || 'Erro de comunicação'), 'error'); } finally { this.loadingExam = false; }
 },
@@ -2505,7 +2499,13 @@ startAssessmentTimer() {
 if (this.assessmentTimer) { clearInterval(this.assessmentTimer); }
 this.assessmentTimer = setInterval(() => { this.assessmentTimeLeft--; if (this.assessmentTimeLeft <= 0) { this.submitAssessment(); } }, 1000);
 },
-selectAssessmentAnswer(questionIndex, answer) { this.$set(this.assessmentAnswers, questionIndex, answer); },
+selectAssessmentAnswer(questionIndex, answer) { this.$set(this.assessmentAnswers, questionIndex, answer); // Update motivational phrase with a new, non‑repeating message
+if (this.usedPhraseIndices.length >= this.motivationalPhrases.length) { this.usedPhraseIndices = []; }
+const available = this.motivationalPhrases.map((_, i) => i).filter(i => !this.usedPhraseIndices.includes(i));
+const randomIdx = available[Math.floor(Math.random() * available.length)];
+this.currentPhraseIndex = randomIdx;
+this.usedPhraseIndices.push(randomIdx);
+},
 async submitAssessment() {
 if (this.assessmentTimer) { clearInterval(this.assessmentTimer); }
 if (this.phraseTimer) { clearInterval(this.phraseTimer); }

@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -50,26 +51,37 @@
 --shadow: rgba(0, 0, 0, 0.08);
 }
 * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-body {
+html, body {
+height: 100vh;
+overflow: hidden;
 font-family: 'Inter', sans-serif;
 background: var(--bg-primary);
 color: var(--text-primary);
-line-height: 1.6;
+line-height: 1.5;
 transition: all 0.3s ease;
-overflow-x: hidden;
-overflow-y: auto;
--webkit-overflow-scrolling: touch;
-font-size: 16px;
+font-size: 14px;
 }
-#app { min-height: 100vh; display: flex; flex-direction: column; max-width: 100vw; overflow-x: hidden; }
+#app {
+height: 100vh;
+display: flex;
+flex-direction: column;
+overflow: hidden;
+}
+.main-scroll {
+flex: 1;
+overflow-y: auto;
+overflow-x: hidden;
+-webkit-overflow-scrolling: touch;
+}
 .header {
 background: var(--bg-secondary);
 border-bottom: 1px solid var(--border);
-padding: 0.75rem 1rem;
+padding: 0.5rem 0.75rem;
 position: sticky;
 top: 0;
 z-index: 1000;
 backdrop-filter: blur(10px);
+flex-shrink: 0;
 }
 .header-content {
 max-width: 1400px;
@@ -161,18 +173,29 @@ gap: 0.75rem;
 display: inline-flex;
 align-items: center;
 justify-content: center;
-gap: 0.375rem;
-padding: 0.625rem 1.25rem;
+gap: 0.3rem;
+padding: 0.55rem 1rem;
 border: none;
 border-radius: var(--radius-md);
 font-weight: 600;
-font-size: 0.875rem;
+font-size: 0.8rem;
 cursor: pointer;
 transition: all 0.3s ease;
 text-decoration: none;
 position: relative;
 overflow: hidden;
-min-height: var(--touch-target);
+min-height: 40px;
+}
+.btn .ripple {
+position: absolute;
+border-radius: 50%;
+background: rgba(255,255,255,0.4);
+transform: scale(0);
+animation: ripple-anim 0.6s ease-out;
+pointer-events: none;
+}
+@keyframes ripple-anim {
+to { transform: scale(4); opacity: 0; }
 }
 .btn::before {
 content: '';
@@ -214,13 +237,31 @@ background: var(--gradient-primary);
 .stat-label { color: var(--text-muted); font-size: 0.75rem; font-weight: 500; }
 .progress-container { margin: 0.75rem 0; }
 .progress-header { display: flex; justify-content: space-between; margin-bottom: 0.375rem; }
-.progress-bar { height: 6px; background: var(--bg-secondary); border-radius: 3px; overflow: hidden; }
+.progress-bar { height: 8px; background: var(--bg-secondary); border-radius: 4px; overflow: hidden; }
 .progress-fill {
 height: 100%;
-background: var(--gradient-primary);
-border-radius: 3px;
+background: linear-gradient(90deg, var(--primary), var(--primary-light), var(--success));
+background-size: 200% 100%;
+border-radius: 4px;
 transition: width 0.5s ease;
 position: relative;
+animation: gradient-shift 2s ease infinite;
+}
+@keyframes gradient-shift {
+0% { background-position: 0% 50%; }
+50% { background-position: 100% 50%; }
+100% { background-position: 0% 50%; }
+}
+.progress-fill::after {
+content: '';
+position: absolute;
+top: 0; left: 0; right: 0; bottom: 0;
+background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent);
+animation: shimmer 1.5s ease infinite;
+}
+@keyframes shimmer {
+0% { transform: translateX(-100%); }
+100% { transform: translateX(100%); }
 }
 .form-group { margin-bottom: 1.25rem; }
 .form-label { display: block; margin-bottom: 0.375rem; color: var(--text-primary); font-weight: 500; font-size: 0.875rem; }
@@ -379,25 +420,26 @@ align-items: center;
 justify-content: center;
 }
 .theme-toggle:hover { color: var(--text-primary); background: var(--bg-hover); }
-.lesson-content { line-height: 1.7; font-size: 1rem; }
-.lesson-content h1 { font-size: 1.5rem; margin: 1.25rem 0 0.75rem; font-weight: 700; }
-.lesson-content h2 { font-size: 1.25rem; margin: 1rem 0 0.625rem; font-weight: 600; }
-.lesson-content h3 { font-size: 1.125rem; margin: 0.875rem 0 0.5rem; font-weight: 600; }
-.lesson-content p { margin: 0.625rem 0; }
-.lesson-content ul, .lesson-content ol { margin: 0.625rem 0; padding-left: 1.5rem; }
-.lesson-content li { margin: 0.25rem 0; }
-.lesson-content code { background: var(--bg-secondary); padding: 0.125rem 0.375rem; border-radius: 4px; font-family: monospace; font-size: 0.875rem; }
-.lesson-content pre { background: var(--bg-secondary); padding: 1rem; border-radius: var(--radius-md); overflow-x: auto; margin: 0.75rem 0; }
-.lesson-content blockquote { border-left: 3px solid var(--primary); padding-left: 1rem; margin: 0.75rem 0; color: var(--text-secondary); }
+.lesson-content { line-height: 1.6; font-size: 0.9rem; }
+.lesson-content h1 { font-size: 1.2rem; margin: 1rem 0 0.6rem; font-weight: 700; }
+.lesson-content h2 { font-size: 1.05rem; margin: 0.8rem 0 0.5rem; font-weight: 600; }
+.lesson-content h3 { font-size: 0.95rem; margin: 0.7rem 0 0.4rem; font-weight: 600; }
+.lesson-content p { margin: 0.5rem 0; }
+.lesson-content ul, .lesson-content ol { margin: 0.5rem 0; padding-left: 1.2rem; }
+.lesson-content li { margin: 0.2rem 0; }
+.lesson-content code { background: var(--bg-secondary); padding: 0.1rem 0.3rem; border-radius: 4px; font-family: monospace; font-size: 0.8rem; }
+.lesson-content pre { background: var(--bg-secondary); padding: 0.75rem; border-radius: var(--radius-md); overflow-x: auto; margin: 0.5rem 0; font-size: 0.8rem; }
+.lesson-content blockquote { border-left: 3px solid var(--primary); padding-left: 0.75rem; margin: 0.5rem 0; color: var(--text-secondary); }
 .lesson-content a { color: var(--primary); text-decoration: none; }
 .lesson-content a:hover { text-decoration: underline; }
-.lesson-section { margin-bottom: 1.5rem; }
+.lesson-section { margin-bottom: 1rem; }
 .example-box {
 background: rgba(99, 102, 241, 0.1);
 border-left: 3px solid var(--primary);
-padding: 1rem;
+padding: 0.75rem;
 border-radius: var(--radius-md);
-margin: 0.75rem 0;
+margin: 0.5rem 0;
+font-size: 0.85rem;
 }
 .timer {
 background: var(--gradient-warning);
@@ -513,6 +555,22 @@ transition: all 0.3s ease;
 .milestone-label { font-size: 0.625rem; color: var(--text-muted); text-align: center; font-weight: 500; }
 .milestone.active .milestone-label { color: var(--primary); }
 .milestone.completed .milestone-label { color: var(--success); }
+.text-truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.text-truncate-2 { overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; max-width: 100%; }
+.study-header-compact { flex-wrap: wrap; gap: 0.5rem; align-items: flex-start; }
+.study-info { flex: 1; min-width: 0; }
+.study-description { color: var(--text-muted); margin-top: 0.2rem; font-size: 0.8rem; line-height: 1.3; }
+.study-meta { display: flex; align-items: center; gap: 0.4rem; margin-top: 0.3rem; }
+.study-buttons { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 1rem; }
+.study-buttons .btn { flex: 1; min-width: 100px; justify-content: center; }
+.study-notice { margin-top: 0.75rem; padding: 0.6rem 0.75rem; background: rgba(245, 158, 11, 0.1); border-left: 3px solid var(--warning); border-radius: var(--radius-md); font-size: 0.8rem; color: var(--text-secondary); display: flex; align-items: center; gap: 0.4rem; }
+.study-progress-card { background: rgba(245, 158, 11, 0.05); border-color: var(--warning); margin-bottom: 1rem; }
+.btn-text { display: inline; }
+@media (max-width: 430px) {
+.btn-text { display: none; }
+.study-buttons .btn { min-width: 80px; padding: 0.5rem; }
+.study-buttons .btn i { margin: 0; }
+}
 .teacher-id-badge {
 background: var(--gradient-primary);
 color: white;
@@ -691,74 +749,342 @@ font-size: 0.875rem;
 .sidebar-btn { background: none; border: none; color: var(--text-secondary); cursor: pointer; padding: 0.375rem; border-radius: var(--radius-md); transition: all 0.3s ease; font-size: 0.875rem; min-height: 32px; min-width: 32px; display: flex; align-items: center; justify-content: center; }
 .sidebar-btn:hover { color: var(--text-primary); background: var(--bg-hover); }
 .main-wrapper { margin-left: 260px; transition: margin-left 0.3s ease; flex: 1; display: flex; flex-direction: column; min-height: 100vh; max-width: 100vw; overflow-x: hidden; }
+.sidebar.collapsed { transform: translateX(-100%); }
+.main-wrapper.expanded { margin-left: 0; }
 .top-bar { background: var(--bg-secondary); border-bottom: 1px solid var(--border); padding: 0.75rem 1rem; position: sticky; top: 0; z-index: 1000; display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; }
 .menu-btn { background: none; border: none; color: var(--text-secondary); cursor: pointer; padding: 0.375rem; border-radius: var(--radius-md); min-height: var(--touch-target); min-width: var(--touch-target); display: flex; align-items: center; justify-content: center; font-size: 1.25rem; flex-shrink: 0; }
 .menu-btn:hover { color: var(--text-primary); background: var(--bg-hover); }
 .top-bar-actions { display: flex; align-items: center; gap: 0.5rem; flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; }
 .sidebar-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 1050; display: none; }
 .sidebar-overlay.show { display: block; }
+#confetti-canvas {
+position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+pointer-events: none; z-index: 9999;
+}
+.exam-overlay {
+position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+background: var(--bg-primary); z-index: 5000;
+display: flex; flex-direction: column;
+overflow-y: auto; -webkit-overflow-scrolling: touch;
+}
+.exam-header {
+display: flex; justify-content: space-between; align-items: center;
+padding: 0.75rem 1rem; background: var(--bg-secondary);
+border-bottom: 1px solid var(--border); flex-shrink: 0;
+flex-wrap: wrap; gap: 0.5rem;
+}
+.exam-header-left { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
+.exam-header-right { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.exam-badge {
+display: inline-flex; align-items: center; gap: 0.35rem;
+padding: 0.3rem 0.65rem; border-radius: 20px;
+font-size: 0.75rem; font-weight: 600; color: white;
+}
+.exam-badge-quiz { background: var(--gradient-warning); }
+.exam-badge-exam { background: var(--gradient-danger); }
+.exam-title { font-size: 1rem; font-weight: 600; color: var(--text-primary); margin: 0; }
+.btn-close {
+background: none; border: none; color: var(--text-secondary);
+cursor: pointer; padding: 0.5rem; border-radius: var(--radius-md);
+font-size: 1.25rem; min-height: 40px; min-width: 40px;
+display: flex; align-items: center; justify-content: center;
+transition: all 0.3s ease;
+}
+.btn-close:hover { color: var(--danger); background: rgba(239, 68, 68, 0.1); }
+.exam-body {
+flex: 1; padding: 1rem; overflow-y: auto;
+-webkit-overflow-scrolling: touch;
+}
+.exam-content {
+max-width: 700px; margin: 0 auto; width: 100%;
+}
+.exam-progress-bar {
+height: 6px; background: var(--bg-secondary); border-radius: 3px;
+overflow: hidden; margin-bottom: 0.5rem;
+}
+.exam-progress-fill {
+height: 100%; background: var(--gradient-primary);
+border-radius: 3px; transition: width 0.3s ease;
+}
+.exam-progress-text {
+font-size: 0.75rem; color: var(--text-muted); margin-bottom: 1rem; text-align: center;
+}
+.exam-question { margin-bottom: 1.5rem; }
+.question-number {
+font-size: 0.7rem; font-weight: 600; color: var(--primary);
+text-transform: uppercase; margin-bottom: 0.35rem;
+}
+.exam-option {
+padding: 0.75rem 1rem; display: flex; align-items: center; gap: 0.75rem;
+}
+.option-letter {
+width: 28px; height: 28px; border-radius: 50%;
+background: var(--bg-secondary); border: 2px solid var(--border);
+display: flex; align-items: center; justify-content: center;
+font-size: 0.75rem; font-weight: 600; color: var(--text-secondary);
+flex-shrink: 0; transition: all 0.3s ease;
+}
+.option-item.selected .option-letter {
+background: var(--primary); border-color: var(--primary); color: white;
+}
+.option-text { flex: 1; font-size: 0.9rem; }
+.exam-submit-btn {
+width: 100%; margin-top: 1.5rem; padding: 0.85rem;
+font-size: 1rem; position: sticky; bottom: 0;
+}
+.lesson-overlay {
+position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+background: var(--bg-primary); z-index: 5000;
+display: flex; flex-direction: column;
+overflow-y: auto; -webkit-overflow-scrolling: touch;
+}
+.lesson-fullscreen {
+display: flex; flex-direction: column; height: 100%;
+}
+.lesson-header {
+display: flex; justify-content: space-between; align-items: center;
+padding: 0.75rem 1rem; background: var(--bg-secondary);
+border-bottom: 1px solid var(--border); flex-shrink: 0;
+flex-wrap: wrap; gap: 0.5rem;
+}
+.lesson-header-left { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
+.lesson-header-right { display: flex; align-items: center; gap: 0.5rem; }
+.lesson-badge {
+display: inline-flex; align-items: center; gap: 0.35rem;
+padding: 0.3rem 0.65rem; border-radius: 20px;
+font-size: 0.75rem; font-weight: 600; color: white;
+background: var(--gradient-primary);
+}
+.lesson-title { font-size: 1rem; font-weight: 600; color: var(--text-primary); margin: 0; }
+.lesson-body {
+flex: 1; padding: 1rem; overflow-y: auto;
+-webkit-overflow-scrolling: touch;
+}
+.lesson-content { max-width: 700px; margin: 0 auto; }
+.section-title {
+display: flex; align-items: center; gap: 0.5rem;
+font-size: 1rem; font-weight: 600; color: var(--text-primary);
+margin-bottom: 0.75rem;
+}
+.objectives-list {
+padding-left: 1.2rem; list-style: none;
+}
+.objectives-list li {
+margin-bottom: 0.4rem; position: relative; padding-left: 1.2rem;
+}
+.objectives-list li::before {
+content: '\f058'; font-family: 'Font Awesome 6 Free'; font-weight: 900;
+position: absolute; left: 0; color: var(--success);
+}
+.summary-box {
+background: rgba(99, 102, 241, 0.1); border-left: 3px solid var(--primary);
+padding: 1rem; border-radius: var(--radius-md);
+}
+.exam-robot {
+position: fixed; bottom: 4rem; left: 1rem;
+display: flex; flex-direction: column; align-items: center; gap: 0.4rem; z-index: 5001;
+}
+.robot-avatar {
+width: 48px; height: 48px; background: var(--gradient-primary);
+border-radius: 50%; display: flex; align-items: center; justify-content: center;
+font-size: 1.5rem; animation: robot-bounce 2s ease infinite;
+}
+@keyframes robot-bounce {
+0%, 100% { transform: translateY(0); }
+50% { transform: translateY(-6px); }
+}
+.robot-phrase {
+background: var(--bg-card); border: 1px solid var(--border);
+border-radius: var(--radius-md); padding: 0.4rem 0.65rem;
+font-size: 0.7rem; color: var(--text-primary);
+max-width: 140px; text-align: center; white-space: normal;
+animation: phrase-fade 0.5s ease;
+}
+@keyframes phrase-fade {
+from { opacity: 0; transform: translateY(5px); }
+to { opacity: 1; transform: translateY(0); }
+}
+.robot-help-btn {
+background: var(--gradient-primary); color: white; border: none;
+border-radius: var(--radius-md); padding: 0.35rem 0.65rem;
+font-size: 0.65rem; font-weight: 600; cursor: pointer;
+display: flex; align-items: center; gap: 0.25rem;
+min-height: 30px; transition: all 0.3s ease;
+}
+.robot-help-btn:hover { transform: scale(1.05); }
+.auth-divider {
+display: flex; align-items: center; gap: 0.75rem;
+color: var(--text-muted); font-size: 0.75rem;
+}
+.auth-divider::before, .auth-divider::after {
+content: ''; flex: 1; height: 1px; background: var(--border);
+}
+.landing-grid { display: grid; grid-template-columns: 1fr; gap: 1rem; max-width: 500px; margin: 0 auto; }
+.landing-card {
+background: var(--gradient-primary); color: white;
+border-radius: var(--radius-lg); padding: 1.25rem;
+}
+.landing-features { display: flex; flex-direction: column; gap: 0.85rem; }
+.landing-feature { display: flex; align-items: center; gap: 0.75rem; }
+.landing-feature-icon {
+background: rgba(255,255,255,0.2); padding: 0.65rem;
+border-radius: var(--radius-lg); flex-shrink: 0;
+}
+.topic-icon {
+width: 36px; height: 36px;
+border-radius: var(--radius-md);
+display: flex; align-items: center; justify-content: center;
+font-size: 1rem; flex-shrink: 0;
+}
+.topic-card.active {
+border-color: var(--primary);
+background: linear-gradient(135deg, var(--bg-secondary), rgba(99, 102, 241, 0.1));
+animation: pulse-card 2s ease infinite;
+}
+@keyframes pulse-card {
+0%, 100% { box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.3); }
+50% { box-shadow: 0 0 0 8px rgba(99, 102, 241, 0); }
+}
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+.fade-in { animation: fade-in 0.3s ease; }
 @media (min-width: 768px) {
-.header { padding: 1rem 2rem; }
-.header-content { gap: 1rem; }
-.logo { font-size: 1.5rem; }
-.logo-icon { padding: 0.5rem; }
-.nav-link { padding: 0.75rem 1.25rem; font-size: 0.875rem; }
-.main-content { padding: 2rem; }
-.card { padding: 1.5rem; }
-.card-title { font-size: 1.25rem; }
-.grid-2 { grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); }
-.grid-3 { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
-.stats-grid { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
-.stat-value { font-size: 2rem; }
-.stat-label { font-size: 0.875rem; }
-.form-input { padding: 0.75rem 1rem; }
-.topic-card { padding: 1.5rem; }
-.question-card { padding: 1.5rem; }
-.question-text { font-size: 1.1rem; }
-.modal-content { max-width: 900px; }
-.modal-header { padding: 1.5rem 2rem; }
-.modal-body { padding: 2rem; }
-.empty-state { padding: 3rem 2rem; }
-.empty-state-icon { font-size: 3rem; }
-.notification { left: auto; max-width: 400px; }
-.chat-container { height: 400px; }
-.chat-message { font-size: 1rem; }
-.lesson-content { font-size: 1.125rem; }
-.lesson-content h1 { font-size: 1.75rem; }
-.lesson-content h2 { font-size: 1.5rem; }
-.lesson-content h3 { font-size: 1.25rem; }
-.profile-pic { width: 100px; height: 100px; font-size: 3rem; }
-.profile-info h2 { font-size: 1.5rem; }
+.header { padding: 0.65rem 1.5rem; }
+.header-content { gap: 0.75rem; }
+.logo { font-size: 1.25rem; }
+.logo-icon { padding: 0.4rem; }
+.nav-link { padding: 0.5rem 1rem; font-size: 0.8rem; }
+.main-content { padding: 1.25rem; }
+.card { padding: 1.25rem; }
+.card-title { font-size: 1.1rem; }
+.grid-2 { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+.grid-3 { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+.stats-grid { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
+.stat-value { font-size: 1.5rem; }
+.stat-label { font-size: 0.75rem; }
+.form-input { padding: 0.6rem 0.85rem; }
+.topic-card { padding: 1.25rem; }
+.question-card { padding: 1.25rem; }
+.question-text { font-size: 1rem; }
+.modal-content { max-width: 700px; }
+.modal-header { padding: 1rem 1.5rem; }
+.modal-body { padding: 1.25rem; }
+.empty-state { padding: 2rem 1.5rem; }
+.empty-state-icon { font-size: 2.5rem; }
+.notification { left: auto; max-width: 350px; }
+.chat-container { height: 300px; }
+.chat-message { font-size: 0.85rem; }
+.lesson-content { font-size: 0.95rem; }
+.lesson-content h1 { font-size: 1.5rem; }
+.lesson-content h2 { font-size: 1.25rem; }
+.lesson-content h3 { font-size: 1.1rem; }
+.profile-pic { width: 80px; height: 80px; font-size: 2rem; }
+.profile-info h2 { font-size: 1.25rem; }
+.landing-grid { grid-template-columns: 1fr 1fr; max-width: 800px; }
 }
 @media (max-width: 767px) {
 .sidebar { transform: translateX(-100%); }
 .sidebar.open { transform: translateX(0); }
 .main-wrapper { margin-left: 0; }
 .menu-btn { display: flex; }
-.main-content { padding: 0.75rem; }
-.card { padding: 1rem; }
-.stats-grid { grid-template-columns: repeat(2, 1fr); gap: 0.5rem; }
-.stat-value { font-size: 1.25rem; }
-.stat-label { font-size: 0.6875rem; }
+.main-content { padding: 0.6rem; }
+.card { padding: 0.85rem; }
+.stats-grid { grid-template-columns: repeat(2, 1fr); gap: 0.4rem; }
+.stat-value { font-size: 1.1rem; }
+.stat-label { font-size: 0.6rem; }
 .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
 .modal-content { max-width: 100%; max-height: 95vh; }
-.modal-header { padding: 1rem; }
-.modal-body { padding: 1rem; }
+.modal-header { padding: 0.75rem; }
+.modal-body { padding: 0.75rem; }
+.exam-robot { bottom: 3.5rem; left: 0.5rem; }
+.robot-avatar { width: 40px; height: 40px; font-size: 1.25rem; }
+.robot-phrase { font-size: 0.65rem; max-width: 120px; }
 }
 @media (min-width: 1024px) {
 .grid-2 { grid-template-columns: repeat(2, 1fr); }
 .grid-3 { grid-template-columns: repeat(3, 1fr); }
 .grid-4 { grid-template-columns: repeat(4, 1fr); }
 }
+@media (max-width: 400px) {
+body { font-size: 13px; }
+.card { padding: 0.75rem; }
+.btn { padding: 0.45rem 0.85rem; font-size: 0.75rem; min-height: 36px; }
+.stat-value { font-size: 1rem; }
+}
+@media (max-width: 430px) and (max-height: 900px) {
+body { font-size: 13px; }
+.main-content { padding: 0.5rem; }
+.card { padding: 0.65rem; margin-bottom: 0.5rem; }
+.card-title { font-size: 0.95rem; }
+.card-header { margin-bottom: 0.75rem; gap: 0.5rem; }
+.stats-grid { gap: 0.35rem; }
+.stat-card { padding: 0.6rem; }
+.stat-value { font-size: 1rem; }
+.stat-label { font-size: 0.6rem; }
+.grid { gap: 0.6rem; }
+.form-group { margin-bottom: 0.75rem; }
+.form-input { padding: 0.5rem 0.7rem; font-size: 0.85rem; min-height: 38px; }
+.btn { padding: 0.45rem 0.8rem; font-size: 0.8rem; min-height: 38px; }
+.btn-sm { padding: 0.25rem 0.5rem; font-size: 0.7rem; min-height: 32px; }
+.topic-card { padding: 0.75rem; }
+.question-text { font-size: 0.85rem; }
+.option-item { padding: 0.5rem 0.7rem; min-height: 38px; }
+.progress-container { margin: 0.5rem 0; }
+.progress-header { font-size: 0.8rem; }
+.milestone-label { font-size: 0.55rem; }
+.chat-container { height: 200px; }
+.chat-message { font-size: 0.8rem; padding: 0.5rem 0.7rem; }
+.lesson-content { font-size: 0.85rem; }
+.lesson-content h1 { font-size: 1.1rem; margin: 0.75rem 0 0.5rem; }
+.lesson-content h2 { font-size: 1rem; margin: 0.6rem 0 0.4rem; }
+.lesson-content h3 { font-size: 0.9rem; margin: 0.5rem 0 0.3rem; }
+.lesson-content p { margin: 0.4rem 0; }
+.modal-content { max-height: 90vh; }
+.modal-header { padding: 0.6rem 0.75rem; }
+.modal-header .card-title { font-size: 0.9rem; }
+.modal-body { padding: 0.75rem; }
+.exam-robot { bottom: 3rem; left: 0.4rem; }
+.robot-avatar { width: 35px; height: 35px; font-size: 1.1rem; }
+.robot-phrase { font-size: 0.6rem; max-width: 100px; padding: 0.3rem 0.5rem; }
+.robot-help-btn { font-size: 0.65rem; padding: 0.2rem 0.4rem; }
+.timer { font-size: 0.75rem; padding: 0.3rem 0.6rem; }
+.help-counter { font-size: 0.6rem; padding: 0.1rem 0.4rem; }
+.achievement-badge { font-size: 0.65rem; padding: 0.2rem 0.5rem; }
+.role-badge { font-size: 0.6rem; padding: 0.1rem 0.4rem; }
+.topic-status { font-size: 0.6rem; padding: 0.1rem 0.4rem; }
+.profile-pic { width: 60px; height: 60px; font-size: 1.5rem; }
+.profile-info h2 { font-size: 1rem; }
+.profile-info p { font-size: 0.75rem; }
+.exam-close { width: 32px; height: 32px; font-size: 1rem; }
+.exam-header { padding: 0.5rem 0.75rem; }
+.exam-header .card-title { font-size: 0.85rem; }
+.exam-body { padding: 0.75rem; }
+.landing-grid { gap: 0.5rem; }
+.landing-card { padding: 0.5rem; }
+.landing-feature { gap: 0.5rem; }
+.landing-feature-icon { width: 28px; height: 28px; font-size: 0.8rem; }
+.landing-feature h3 { font-size: 0.75rem; }
+.landing-feature p { font-size: 0.65rem; }
+.text-truncate { max-width: 180px; }
+.study-description { font-size: 0.75rem; }
+.study-meta small { font-size: 0.7rem; }
+.progress-header { font-size: 0.75rem; }
+.milestone-label { font-size: 0.5rem; }
+.milestone-dot { width: 8px; height: 8px; }
+.study-notice { font-size: 0.7rem; padding: 0.5rem 0.6rem; }
+.study-notice i { font-size: 0.8rem; }
+.card-header { flex-wrap: wrap; }
+.card-header .btn { margin-top: 0.25rem; }
+}
 </style>
 </head>
 <body :class="{ 'light-mode': !darkMode }">
 <div id="app">
+<canvas id="confetti-canvas"></canvas>
 <div v-if="notification.show" class="notification" :class="[notification.type, { show: notification.show }]">
 <i :class="notification.icon"></i> {{ notification.message }}
 </div>
 <!-- Sidebar -->
-<aside class="sidebar" :class="{ open: isSidebarOpen && windowWidth < 768 }" v-if="isAuthenticated">
+<aside class="sidebar" :class="{ open: isSidebarOpen && windowWidth < 768, collapsed: !isSidebarOpen && windowWidth >= 768 }" v-if="isAuthenticated">
 <div class="sidebar-header">
 <a href="#" class="sidebar-logo" @click.prevent="changeView('dashboard')">
 <div class="sidebar-logo-icon"><i class="fas fa-brain"></i></div>
@@ -797,7 +1123,7 @@ font-size: 0.875rem;
 </div>
 </aside>
 <div class="sidebar-overlay" :class="{ show: isSidebarOpen && windowWidth < 768 }" @click="isSidebarOpen = false"></div>
-<div class="main-wrapper">
+<div class="main-wrapper" :class="{ expanded: !isSidebarOpen && windowWidth >= 768 }">
 <header class="top-bar" v-if="isAuthenticated">
 <button class="menu-btn" @click="isSidebarOpen = true" title="Menu"><i class="fas fa-bars"></i></button>
 <div class="top-bar-actions">
@@ -805,125 +1131,37 @@ font-size: 0.875rem;
 <div class="role-badge" :class="'role-' + user.role"><i class="fas fa-user"></i> {{ user.role === 'student' ? 'Aluno' : user.role === 'teacher' ? 'Professor' : 'Admin' }}</div>
 </div>
 </header>
-<main class="main-content">
+<main class="main-content main-scroll">
 <div v-if="!isAuthenticated">
-<div class="grid grid-2" style="max-width: 1000px; margin: 2rem auto;">
-<div class="card">
-<div class="card-header"><h2 class="card-title">Acessar StudyAI</h2></div>
-<div class="form-group">
-<label class="form-label">Usuário</label>
-<input type="text" class="form-input" v-model="loginForm.username" placeholder="Digite seu usuário" :disabled="loadingLogin" @keyup.enter="login">
-</div>
-<div class="form-group">
-<label class="form-label">Senha</label>
-<input type="password" class="form-input" v-model="loginForm.password" placeholder="Digite sua senha" :disabled="loadingLogin" @keyup.enter="login">
-</div>
-<button class="btn btn-primary" style="width: 100%;" @click="login" :disabled="loadingLogin">
-<span class="loading" v-if="loadingLogin"></span>
-<i class="fas fa-sign-in-alt" v-else></i> {{ loadingLogin ? 'Entrando...' : 'Entrar' }}
-</button>
-<div style="text-align: center; margin-top: 1.5rem;">
-<p style="color: var(--text-muted);">Não tem conta?</p>
-<button class="btn btn-outline" style="width: 100%; margin-top: 0.5rem;" @click="showRegister = true">
-<i class="fas fa-user-plus"></i> Criar Nova Conta
-</button>
-</div>
-</div>
-<div class="card" style="background: var(--gradient-primary); color: white;">
-<div style="padding: 2rem;">
-<h2 style="font-size: 2rem; margin-bottom: 1rem; font-weight: 700;">Bem-vindo ao StudyAI</h2>
-<p style="font-size: 1.1rem; margin-bottom: 2rem; opacity: 0.9;">Sua plataforma inteligente de aprendizado personalizado com IA</p>
-<div style="display: flex; flex-direction: column; gap: 1.5rem;">
-<div style="display: flex; align-items: center; gap: 1rem;">
-<div style="background: rgba(255,255,255,0.2); padding: 1rem; border-radius: var(--radius-lg);"><i class="fas fa-robot" style="font-size: 1.5rem;"></i></div>
-<div><h3 style="font-weight: 600; margin-bottom: 0.25rem;">IA Personalizada</h3><p style="opacity: 0.9;">Conteúdo adaptado ao seu nível e ritmo</p></div>
-</div>
-<div style="display: flex; align-items: center; gap: 1rem;">
-<div style="background: rgba(255,255,255,0.2); padding: 1rem; border-radius: var(--radius-lg);"><i class="fas fa-chart-line" style="font-size: 1.5rem;"></i></div>
-<div><h3 style="font-weight: 600; margin-bottom: 0.25rem;">Progresso Detalhado</h3><p style="opacity: 0.9;">Acompanhamento completo do seu desenvolvimento</p></div>
-</div>
-<div style="display: flex; align-items: center; gap: 1rem;">
-<div style="background: rgba(255,255,255,0.2); padding: 1rem; border-radius: var(--radius-lg);"><i class="fas fa-trophy" style="font-size: 1.5rem;"></i></div>
-<div><h3 style="font-weight: 600; margin-bottom: 0.25rem;">Sistema de Conquistas</h3><p style="opacity: 0.9;">Motivação através de metas e reconhecimento</p></div>
-</div>
-</div>
-</div>
-</div>
-</div>
-<div v-if="showRegister" class="card" style="max-width: 800px; margin: 2rem auto;">
-<div class="card-header">
-<h2 class="card-title">Criar Nova Conta</h2>
-<button class="btn btn-outline btn-sm" @click="showRegister = false"><i class="fas fa-arrow-left"></i> Voltar</button>
-</div>
-<div class="grid grid-2">
-<div>
-<h3 style="margin-bottom: 1rem; color: var(--text-primary);">Informações da Conta</h3>
-<div class="form-group">
-<label class="form-label">Tipo de Conta</label>
-<select class="form-input" v-model="registerForm.role" :disabled="loadingRegister">
-<option value="student">Aluno</option>
-<option value="teacher">Professor</option>
-</select>
-<small style="color: var(--text-muted); display: block; margin-top: 0.5rem;">
-<span v-if="registerForm.role === 'teacher'"><i class="fas fa-info-circle"></i> Contas de professor precisam ser aprovadas.</span>
-<span v-else><i class="fas fa-info-circle"></i> Alunos podem se associar a um professor.</span>
-</small>
-</div>
-<div class="form-group">
-<label class="form-label">Usuário</label>
-<input type="text" class="form-input" v-model="registerForm.username" placeholder="Escolha um usuário" :disabled="loadingRegister">
-</div>
-<div class="form-group">
-<label class="form-label">Email</label>
-<input type="email" class="form-input" v-model="registerForm.email" placeholder="Seu melhor email" :disabled="loadingRegister">
-</div>
-<div class="form-group">
-<label class="form-label">Senha</label>
-<input type="password" class="form-input" v-model="registerForm.password" placeholder="Mínimo 8 caracteres" :disabled="loadingRegister">
-</div>
-<div class="form-group" v-if="registerForm.role === 'student'">
-<label class="form-label">ID do Professor (Opcional)</label>
-<input type="text" class="form-input" v-model="registerForm.teacher_id" placeholder="ID do seu professor" :disabled="loadingRegister">
-<small style="color: var(--text-muted); display: block; margin-top: 0.5rem;">Peça o ID do seu professor para se associar.</small>
-</div>
-</div>
-<div>
-<h3 style="margin-bottom: 1rem; color: var(--text-primary);">Perfil de Aprendizado</h3>
-<div class="form-group">
-<label class="form-label">Nome Completo</label>
-<input type="text" class="form-input" v-model="registerForm.full_name" placeholder="Seu nome completo" :disabled="loadingRegister">
-</div>
-<div class="form-group">
-<label class="form-label">Idade</label>
-<input type="number" class="form-input" v-model="registerForm.age" placeholder="Sua idade" :disabled="loadingRegister" min="1" max="125">
-</div>
-<div class="form-group">
-<label class="form-label">Estilo de Aprendizado</label>
-<select class="form-input" v-model="registerForm.preferred_learning_style" :disabled="loadingRegister">
-<option value="visual">Visual</option>
-<option value="auditivo">Auditivo</option>
-<option value="cinestésico">Cinestésico</option>
-<option value="leitura">Leitura/Escrita</option>
-</select>
-</div>
-</div>
-</div>
-<div class="form-group">
-<label class="form-label">Interesses de Estudo</label>
-<textarea class="form-input" v-model="registerForm.interests" placeholder="Ex: Matemática, Programação, História..." :disabled="loadingRegister"></textarea>
-</div>
-<div class="form-group">
-<label class="form-label">Metas de Aprendizado</label>
-<textarea class="form-input" v-model="registerForm.learning_goals" placeholder="Ex: Aprender Python, Melhorar em Cálculo..." :disabled="loadingRegister"></textarea>
-</div>
-<button class="btn btn-success" style="width: 100%;" @click="register" :disabled="loadingRegister">
-<span class="loading" v-if="loadingRegister"></span>
-<i class="fas fa-check" v-else></i> {{ loadingRegister ? 'Criando Conta...' : 'Criar Minha Conta' }}
-</button>
-<div class="card" style="background: rgba(245, 158, 11, 0.1); border-color: var(--warning); margin-top: 1.5rem;">
+<div class="landing-grid" style="margin: 1rem auto;">
+<div class="card" style="text-align: center;">
 <div style="padding: 1rem;">
-<h4 style="color: var(--warning); margin-bottom: 0.5rem;"><i class="fas fa-info-circle"></i> Informação Importante</h4>
-<p style="color: var(--text-muted); margin: 0;">O <strong>primeiro usuário</strong> será configurado como <strong>Administrador</strong>.</p>
+<h2 style="font-size: 1.5rem; margin-bottom: 0.5rem; font-weight: 700;">Bem-vindo ao StudyAI</h2>
+<p style="font-size: 0.85rem; margin-bottom: 1.25rem; color: var(--text-muted);">Sua plataforma inteligente de aprendizado com IA</p>
+<button class="btn btn-primary" style="width: 100%; margin-bottom: 0.75rem;" @click="showLoginModal = true">
+<i class="fas fa-sign-in-alt"></i> Entrar
+</button>
+<button class="btn btn-outline" style="width: 100%;" @click="showRegisterModal = true">
+<i class="fas fa-user-plus"></i> Registrar-se
+</button>
+</div>
+</div>
+<div class="landing-card">
+<div style="padding: 0.5rem;">
+<div class="landing-features">
+<div class="landing-feature">
+<div class="landing-feature-icon"><i class="fas fa-robot"></i></div>
+<div><h3 style="font-weight: 600; margin-bottom: 0.15rem; font-size: 0.9rem;">IA Personalizada</h3><p style="opacity: 0.9; font-size: 0.8rem;">Conteúdo adaptado ao seu nível</p></div>
+</div>
+<div class="landing-feature">
+<div class="landing-feature-icon"><i class="fas fa-chart-line"></i></div>
+<div><h3 style="font-weight: 600; margin-bottom: 0.15rem; font-size: 0.9rem;">Progresso Detalhado</h3><p style="opacity: 0.9; font-size: 0.8rem;">Acompanhamento completo</p></div>
+</div>
+<div class="landing-feature">
+<div class="landing-feature-icon"><i class="fas fa-trophy"></i></div>
+<div><h3 style="font-weight: 600; margin-bottom: 0.15rem; font-size: 0.9rem;">Sistema de Conquistas</h3><p style="opacity: 0.9; font-size: 0.8rem;">Metas e reconhecimento</p></div>
+</div>
+</div>
 </div>
 </div>
 </div>
@@ -1138,28 +1376,28 @@ font-size: 0.875rem;
 </div>
 <div v-if="currentView === 'study' && selectedTheme" class="grid">
 <div class="card">
-<div class="card-header">
-<div>
-<h2 class="card-title">{{ selectedTheme.theme_name }}</h2>
-<p style="color: var(--text-muted); margin-top: 0.25rem;">{{ selectedTheme.description }}</p>
-<div style="display: flex; align-items: center; margin-top: 0.5rem;">
-<small style="color: var(--text-muted);">ID: {{ selectedTheme.theme_id }}</small>
-<button class="btn btn-outline btn-sm" @click="copyToClipboard(selectedTheme.theme_id)" style="margin-left: 0.5rem; padding: 0.1rem 0.4rem;"><i class="fas fa-copy"></i></button>
+<div class="card-header study-header-compact">
+<div class="study-info">
+<h2 class="card-title text-truncate">{{ selectedTheme.theme_name }}</h2>
+<p class="study-description text-truncate-2">{{ selectedTheme.description }}</p>
+<div class="study-meta">
+<small class="text-truncate">ID: {{ selectedTheme.theme_id }}</small>
+<button class="btn btn-outline btn-sm" @click="copyToClipboard(selectedTheme.theme_id)"><i class="fas fa-copy"></i></button>
 </div>
-<div v-if="selectedTheme.tag" style="margin-top: 0.5rem;">
-<span class="topic-status" style="background: rgba(99, 102, 241, 0.2); color: var(--primary);">{{ selectedTheme.tag }}</span>
+<div v-if="selectedTheme.tag">
+<span class="topic-status">{{ selectedTheme.tag }}</span>
 </div>
 </div>
-<button class="btn btn-outline" @click="changeView('themes')"><i class="fas fa-arrow-left"></i> Voltar aos Temas</button>
+<button class="btn btn-outline btn-sm" @click="changeView('themes')"><i class="fas fa-arrow-left"></i> <span class="btn-text">Voltar</span></button>
 </div>
-<div v-if="themeProgress.current_topic" class="card" style="background: rgba(245, 158, 11, 0.05); border-color: var(--warning); margin-bottom: 2rem;">
-<div class="card-header">
-<div>
-<h3 class="card-title">{{ themeProgress.current_topic.topic_name }}</h3>
-<p style="color: var(--text-muted); margin-top: 0.25rem;">{{ themeProgress.current_topic.topic_description }}</p>
-<div style="display: flex; align-items: center; margin-top: 0.5rem;">
-<small style="color: var(--text-muted);">ID: {{ themeProgress.current_topic.topic_id }}</small>
-<button class="btn btn-outline btn-sm" @click="copyToClipboard(themeProgress.current_topic.topic_id)" style="margin-left: 0.5rem; padding: 0.1rem 0.4rem;"><i class="fas fa-copy"></i></button>
+<div v-if="themeProgress.current_topic" class="card study-progress-card">
+<div class="card-header study-header-compact">
+<div class="study-info">
+<h3 class="card-title text-truncate">{{ themeProgress.current_topic.topic_name }}</h3>
+<p class="study-description text-truncate-2">{{ themeProgress.current_topic.topic_description }}</p>
+<div class="study-meta">
+<small class="text-truncate">ID: {{ themeProgress.current_topic.topic_id }}</small>
+<button class="btn btn-outline btn-sm" @click="copyToClipboard(themeProgress.current_topic.topic_id)"><i class="fas fa-copy"></i></button>
 </div>
 </div>
 <span class="topic-status" :class="'status-' + themeProgress.current_topic.status">
@@ -1168,8 +1406,8 @@ font-size: 0.875rem;
 </div>
 <div class="progress-container">
 <div class="progress-header">
-<span style="color: var(--text-primary); font-weight: 600;">Progresso do Tópico</span>
-<span style="color: var(--text-muted);">{{ themeProgress.current_topic.progress }}%</span>
+<span>Progresso do Tópico</span>
+<span>{{ themeProgress.current_topic.progress }}%</span>
 </div>
 <div class="progress-bar"><div class="progress-fill" :style="{ width: themeProgress.current_topic.progress + '%' }"></div></div>
 <div class="progress-milestones">
@@ -1184,29 +1422,25 @@ font-size: 0.875rem;
 </div>
 </div>
 </div>
-<div style="display: flex; gap: 1rem; flex-wrap: wrap; margin-top: 1.5rem;">
+<div class="study-buttons">
 <button @click="generateLesson" class="btn btn-primary" :disabled="loadingLesson">
 <span class="loading" v-if="loadingLesson"></span>
-<i class="fas fa-book" v-else></i> {{ loadingLesson ? 'Gerando...' : 'Gerar Lição' }}
+<i class="fas fa-book" v-else></i> <span class="btn-text">Gerar Lição</span>
 </button>
 <button @click="generateQuiz" class="btn btn-warning" :disabled="loadingQuiz || !themeProgress.current_topic.quiz_available">
 <span class="loading" v-if="loadingQuiz"></span>
-<i class="fas fa-question-circle" v-else></i> {{ loadingQuiz ? 'Gerando...' : 'Simulado (5q)' }}
+<i class="fas fa-question-circle" v-else></i> <span class="btn-text">Simulado (5q)</span>
 </button>
 <button @click="generateExam" class="btn btn-danger" :disabled="loadingExam || !themeProgress.current_topic.exam_available">
 <span class="loading" v-if="loadingExam"></span>
-<i class="fas fa-file-alt" v-else></i> {{ loadingExam ? 'Gerando...' : 'Prova (10q)' }}
+<i class="fas fa-file-alt" v-else></i> <span class="btn-text">Prova (10q)</span>
 </button>
 </div>
-<div v-if="!themeProgress.current_topic.quiz_available" style="margin-top: 1rem;">
-<div class="example-box" style="background: rgba(245, 158, 11, 0.1); border-color: var(--warning);">
-<i class="fas fa-info-circle" style="color: var(--warning);"></i> Complete pelo menos uma lição antes de fazer um simulado.
+<div v-if="!themeProgress.current_topic.quiz_available" class="study-notice">
+<i class="fas fa-info-circle"></i> Complete uma lição antes de fazer um simulado.
 </div>
-</div>
-<div v-if="!themeProgress.current_topic.exam_available && themeProgress.current_topic.quiz_available" style="margin-top: 1rem;">
-<div class="example-box" style="background: rgba(245, 158, 11, 0.1); border-color: var(--warning);">
-<i class="fas fa-info-circle" style="color: var(--warning);"></i> Complete 3 simulados com nota mínima de 50% antes de fazer a prova.
-</div>
+<div v-if="!themeProgress.current_topic.exam_available && themeProgress.current_topic.quiz_available" class="study-notice">
+<i class="fas fa-info-circle"></i> Complete 3 simulados com nota mínima de 50% antes da prova.
 </div>
 </div>
 <div class="card">
@@ -1373,35 +1607,6 @@ font-size: 0.875rem;
 <div class="card-header">
 <h2 class="card-title">Fórum de Discussão</h2>
 <button class="btn btn-primary" @click="showCreatePost = true"><i class="fas fa-plus"></i> Novo Post</button>
-</div>
-<div v-if="showCreatePost" class="modal-overlay" @click="showCreatePost = false">
-<div class="modal-content" @click.stop style="max-width: 600px;">
-<div class="modal-header">
-<h3 class="card-title">Criar Novo Post</h3>
-<button class="btn btn-outline btn-sm" @click="showCreatePost = false"><i class="fas fa-times"></i></button>
-</div>
-<div class="modal-body">
-<div class="form-group">
-<label class="form-label">Categoria</label>
-<select class="form-input" v-model="newPost.category_id" :disabled="loadingPost">
-<option value="">Selecione uma categoria</option>
-<option v-for="category in forumCategories" :key="category.id" :value="category.id">{{ category.name }}</option>
-</select>
-</div>
-<div class="form-group">
-<label class="form-label">Título</label>
-<input type="text" class="form-input" v-model="newPost.title" placeholder="Título do post" :disabled="loadingPost">
-</div>
-<div class="form-group">
-<label class="form-label">Conteúdo</label>
-<textarea class="form-input" v-model="newPost.content" placeholder="Escreva seu post aqui..." :disabled="loadingPost"></textarea>
-</div>
-<button class="btn btn-success" @click="createPost" :disabled="!newPost.category_id || !newPost.title || !newPost.content || loadingPost">
-<span class="loading" v-if="loadingPost"></span>
-<i class="fas fa-check" v-else></i> {{ loadingPost ? 'Criando...' : 'Criar Post' }}
-</button>
-</div>
-</div>
 </div>
 <div v-if="!selectedForumCategory" class="grid">
 <div v-for="category in forumCategories" :key="category.id" class="forum-category" @click="selectForumCategory(category)">
@@ -1705,62 +1910,183 @@ font-size: 0.875rem;
 </div>
 </main>
 </div>
-<div v-if="showLessonModal" class="modal-overlay" @click="closeLessonModal">
-<div class="modal-content" @click.stop>
+<!-- Login Modal -->
+<div v-if="showLoginModal" class="modal-overlay" @click="showLoginModal = false">
+<div class="modal-content" @click.stop style="max-width: 400px;">
 <div class="modal-header">
-<h3 class="card-title">Lição: {{ activeLesson.topic.topic_name }}</h3>
-<div>
-<button @click="showHelpModal = true; helpSessionId = activeLesson.session_id" class="btn btn-outline btn-sm"><i class="fas fa-question-circle"></i> Ajuda</button>
-<button @click="closeLessonModal" class="btn btn-outline btn-sm"><i class="fas fa-times"></i></button>
-</div>
+<h3 class="card-title"><i class="fas fa-sign-in-alt" style="color: var(--primary);"></i> Entrar</h3>
+<button class="btn btn-outline btn-sm" @click="showLoginModal = false"><i class="fas fa-times"></i></button>
 </div>
 <div class="modal-body">
+<div class="form-group">
+<label class="form-label">Usuário</label>
+<input type="text" class="form-input" v-model="loginForm.username" placeholder="Digite seu usuário" :disabled="loadingLogin" @keyup.enter="login">
+</div>
+<div class="form-group">
+<label class="form-label">Senha</label>
+<input type="password" class="form-input" v-model="loginForm.password" placeholder="Digite sua senha" :disabled="loadingLogin" @keyup.enter="login">
+</div>
+<button class="btn btn-primary" style="width: 100%;" @click="login" :disabled="loadingLogin">
+<span class="loading" v-if="loadingLogin"></span>
+<i class="fas fa-sign-in-alt" v-else></i> {{ loadingLogin ? 'Entrando...' : 'Entrar' }}
+</button>
+<div class="auth-divider" style="margin: 0.75rem 0;">ou</div>
+<button class="btn btn-outline" style="width: 100%;" @click="showLoginModal = false; showRegisterModal = true">
+<i class="fas fa-user-plus"></i> Criar Conta
+</button>
+</div>
+</div>
+</div>
+<!-- Register Modal -->
+<div v-if="showRegisterModal" class="modal-overlay" @click="showRegisterModal = false">
+<div class="modal-content" @click.stop style="max-width: 550px;">
+<div class="modal-header">
+<h3 class="card-title"><i class="fas fa-user-plus" style="color: var(--success);"></i> Criar Conta</h3>
+<button class="btn btn-outline btn-sm" @click="showRegisterModal = false"><i class="fas fa-times"></i></button>
+</div>
+<div class="modal-body">
+<div class="form-group">
+<label class="form-label">Tipo de Conta</label>
+<select class="form-input" v-model="registerForm.role" :disabled="loadingRegister">
+<option value="student">Aluno</option>
+<option value="teacher">Professor</option>
+</select>
+<small style="color: var(--text-muted); display: block; margin-top: 0.3rem; font-size: 0.7rem;">
+<span v-if="registerForm.role === 'teacher'"><i class="fas fa-info-circle"></i> Contas de professor precisam ser aprovadas.</span>
+<span v-else><i class="fas fa-info-circle"></i> Alunos podem se associar a um professor.</span>
+</small>
+</div>
+<div class="form-group">
+<label class="form-label">Usuário</label>
+<input type="text" class="form-input" v-model="registerForm.username" placeholder="Escolha um usuário" :disabled="loadingRegister">
+</div>
+<div class="form-group">
+<label class="form-label">Email</label>
+<input type="email" class="form-input" v-model="registerForm.email" placeholder="Seu melhor email" :disabled="loadingRegister">
+</div>
+<div class="form-group">
+<label class="form-label">Senha</label>
+<input type="password" class="form-input" v-model="registerForm.password" placeholder="Mínimo 8 caracteres" :disabled="loadingRegister">
+</div>
+<div class="form-group" v-if="registerForm.role === 'student'">
+<label class="form-label">ID do Professor (Opcional)</label>
+<input type="text" class="form-input" v-model="registerForm.teacher_id" placeholder="ID do seu professor" :disabled="loadingRegister">
+</div>
+<div class="form-group">
+<label class="form-label">Nome Completo</label>
+<input type="text" class="form-input" v-model="registerForm.full_name" placeholder="Seu nome completo" :disabled="loadingRegister">
+</div>
+<div class="form-group">
+<label class="form-label">Idade</label>
+<input type="number" class="form-input" v-model="registerForm.age" placeholder="Sua idade" :disabled="loadingRegister" min="1" max="125">
+</div>
+<div class="form-group">
+<label class="form-label">Estilo de Aprendizado</label>
+<select class="form-input" v-model="registerForm.preferred_learning_style" :disabled="loadingRegister">
+<option value="visual">Visual</option>
+<option value="auditivo">Auditivo</option>
+<option value="cinestésico">Cinestésico</option>
+<option value="leitura">Leitura/Escrita</option>
+</select>
+</div>
+<div class="form-group">
+<label class="form-label">Interesses de Estudo</label>
+<textarea class="form-input" v-model="registerForm.interests" placeholder="Ex: Matemática, Programação..." :disabled="loadingRegister"></textarea>
+</div>
+<div class="form-group">
+<label class="form-label">Metas de Aprendizado</label>
+<textarea class="form-input" v-model="registerForm.learning_goals" placeholder="Ex: Aprender Python..." :disabled="loadingRegister"></textarea>
+</div>
+<button class="btn btn-success" style="width: 100%;" @click="register" :disabled="loadingRegister">
+<span class="loading" v-if="loadingRegister"></span>
+<i class="fas fa-check" v-else></i> {{ loadingRegister ? 'Criando Conta...' : 'Criar Minha Conta' }}
+</button>
+<div class="card" style="background: rgba(245, 158, 11, 0.1); border-color: var(--warning); margin-top: 1rem;">
+<div style="padding: 0.75rem;">
+<h4 style="color: var(--warning); margin-bottom: 0.35rem; font-size: 0.85rem;"><i class="fas fa-info-circle"></i> Informação</h4>
+<p style="color: var(--text-muted); margin: 0; font-size: 0.75rem;">O <strong>primeiro usuário</strong> será <strong>Administrador</strong>.</p>
+</div>
+</div>
+</div>
+</div>
+</div>
+<div v-if="showLessonModal" class="lesson-overlay" @click="closeLessonModal">
+<div class="lesson-fullscreen">
+<div class="lesson-header">
+<div class="lesson-header-left">
+<span class="lesson-badge"><i class="fas fa-book"></i> Lição</span>
+<h2 class="lesson-title">{{ activeLesson.topic.topic_name }}</h2>
+</div>
+<div class="lesson-header-right">
+<button @click="showHelpModal = true; helpSessionId = activeLesson.session_id" class="btn btn-outline btn-sm"><i class="fas fa-question-circle"></i> Ajuda</button>
+<button @click="closeLessonModal" class="btn-close"><i class="fas fa-times"></i></button>
+</div>
+</div>
+<div class="lesson-body">
 <div class="lesson-content">
 <div v-if="activeLesson.content.lição" class="lesson-section" v-html="renderMarkdown(activeLesson.content.lição)"></div>
 <div v-if="activeLesson.content.exemplos && activeLesson.content.exemplos.length" class="lesson-section">
-<h4 style="margin-bottom: 1rem; color: var(--text-primary);">Exemplos Práticos</h4>
+<h4 class="section-title"><i class="fas fa-lightbulb" style="color: var(--warning);"></i> Exemplos Práticos</h4>
 <div v-for="(exemplo, index) in activeLesson.content.exemplos" :key="index" class="example-box"><strong>Exemplo {{ index + 1 }}:</strong> {{ exemplo }}</div>
 </div>
 <div v-if="activeLesson.content.exercícios && activeLesson.content.exercícios.length" class="lesson-section">
-<h4 style="margin-bottom: 1rem; color: var(--text-primary);">Exercícios de Fixação</h4>
+<h4 class="section-title"><i class="fas fa-pen" style="color: var(--primary);"></i> Exercícios de Fixação</h4>
 <div v-for="(exercicio, index) in activeLesson.content.exercícios" :key="index" class="question-card"><p><strong>Exercício {{ index + 1 }}:</strong> {{ exercicio }}</p></div>
 </div>
 <div v-if="activeLesson.content.objetivos && activeLesson.content.objetivos.length" class="lesson-section">
-<h4 style="margin-bottom: 1rem; color: var(--text-primary);">Objetivos de Aprendizado</h4>
-<ul style="padding-left: 1.5rem;"><li v-for="(objetivo, index) in activeLesson.content.objetivos" :key="index" style="margin-bottom: 0.5rem;">{{ objetivo }}</li></ul>
+<h4 class="section-title"><i class="fas fa-bullseye" style="color: var(--success);"></i> Objetivos de Aprendizado</h4>
+<ul class="objectives-list"><li v-for="(objetivo, index) in activeLesson.content.objetivos" :key="index">{{ objetivo }}</li></ul>
 </div>
 <div v-if="activeLesson.content.resumo" class="lesson-section">
-<h4 style="margin-bottom: 1rem; color: var(--text-primary);">Resumo</h4>
-<div class="example-box">{{ activeLesson.content.resumo }}</div>
+<h4 class="section-title"><i class="fas fa-clipboard-check" style="color: var(--info);"></i> Resumo</h4>
+<div class="summary-box">{{ activeLesson.content.resumo }}</div>
 </div>
 </div>
 </div>
 </div>
 </div>
-<div v-if="showAssessmentModal" class="modal-overlay" @click="closeAssessmentModal">
-<div class="modal-content" @click.stop>
-<div class="modal-header">
-<h3 class="card-title">{{ activeAssessment.assessment_type === 'quiz' ? 'Simulado' : 'Prova' }}: {{ activeAssessment.topic.topic_name }}</h3>
-<div style="display: flex; align-items: center; gap: 1rem;">
-<div class="timer" v-if="assessmentTimeLeft > 0"><i class="fas fa-clock"></i> {{ formatTime(assessmentTimeLeft) }}</div>
+<!-- Full-screen Assessment Overlay -->
+<div v-if="showAssessmentModal && isExamFullscreen" class="exam-overlay">
+<div class="exam-header">
+<div class="exam-header-left">
+<span class="exam-badge" :class="activeAssessment.assessment_type === 'quiz' ? 'exam-badge-quiz' : 'exam-badge-exam'">
+<i :class="activeAssessment.assessment_type === 'quiz' ? 'fas fa-gamepad' : 'fas fa-file-alt'"></i>
+{{ activeAssessment.assessment_type === 'quiz' ? 'Simulado' : 'Prova' }}
+</span>
+<h2 class="exam-title">{{ activeAssessment.topic.topic_name }}</h2>
+</div>
+<div class="exam-header-right">
+<div class="timer"><i class="fas fa-clock"></i> {{ formatTime(assessmentTimeLeft) }}</div>
 <button v-if="activeAssessment.assessment_type === 'quiz'" @click="showHelpModal = true; helpAssessmentId = activeAssessment.assessment_id" class="btn btn-outline btn-sm"><i class="fas fa-question-circle"></i> Ajuda<span v-if="helpRemaining !== null" class="help-counter">{{ helpRemaining }}</span></button>
-<button @click="closeAssessmentModal" class="btn btn-outline btn-sm"><i class="fas fa-times"></i></button>
+<button class="btn-close" @click="closeAssessmentModal" title="Fechar"><i class="fas fa-times"></i></button>
 </div>
 </div>
-<div class="modal-body">
-<div style="background: rgba(99, 102, 241, 0.05); border-radius: var(--radius-lg); padding: 2rem;">
-<div v-for="(question, qIndex) in activeAssessment.questions" :key="qIndex" class="question-card">
-<div class="question-text">{{ qIndex + 1 }}. {{ question.pergunta }}</div>
+<div class="exam-body">
+<div class="exam-content">
+<div class="exam-progress-bar">
+<div class="exam-progress-fill" :style="{ width: ((Object.keys(assessmentAnswers).length / activeAssessment.questions.length) * 100) + '%' }"></div>
+</div>
+<div class="exam-progress-text">{{ Object.keys(assessmentAnswers).length }}/{{ activeAssessment.questions.length }} respondidas</div>
+<div v-for="(question, qIndex) in activeAssessment.questions" :key="qIndex" class="question-card exam-question">
+<div class="question-number">Questão {{ qIndex + 1 }}</div>
+<div class="question-text">{{ question.pergunta }}</div>
 <div class="options-grid">
-<div v-for="(option, oIndex) in question.opções" :key="oIndex" class="option-item" :class="{ selected: assessmentAnswers[qIndex] === option }" @click="selectAssessmentAnswer(qIndex, option)">{{ option }}</div>
+<div v-for="(option, oIndex) in question.opções" :key="oIndex" class="option-item exam-option" :class="{ selected: assessmentAnswers[qIndex] === option }" @click="selectAssessmentAnswer(qIndex, option)">
+<span class="option-letter">{{ String.fromCharCode(65 + oIndex) }}</span>
+<span class="option-text">{{ option }}</span>
 </div>
 </div>
-<button @click="submitAssessment" class="btn btn-success" style="width: 100%; margin-top: 2rem;" :disabled="loadingAssessmentSubmit || Object.keys(assessmentAnswers).length < activeAssessment.questions.length">
+</div>
+<button @click="submitAssessment" class="btn btn-success exam-submit-btn" :disabled="loadingAssessmentSubmit || Object.keys(assessmentAnswers).length < activeAssessment.questions.length">
 <span class="loading" v-if="loadingAssessmentSubmit"></span>
 <i class="fas fa-paper-plane" v-else></i> {{ loadingAssessmentSubmit ? 'Enviando...' : 'Finalizar Avaliação' }}
 </button>
 </div>
 </div>
+<div class="exam-robot">
+<div class="robot-avatar">🤖</div>
+<div class="robot-phrase" :key="currentPhraseIndex">{{ motivationalPhrases[currentPhraseIndex] }}</div>
+<button class="robot-help-btn" @click="showHelpFromExam"><i class="fas fa-question-circle"></i> Pedir Ajuda</button>
 </div>
 </div>
 <div v-if="showResultsModal" class="modal-overlay" @click="closeResultsModal">
@@ -1858,13 +2184,44 @@ font-size: 0.875rem;
 </div>
 </div>
 </div>
+<!-- Create Post Modal -->
+<div v-if="showCreatePost" class="modal-overlay" @click="showCreatePost = false">
+<div class="modal-content" @click.stop style="max-width: 600px;">
+<div class="modal-header">
+<h3 class="card-title">Criar Novo Post</h3>
+<button class="btn btn-outline btn-sm" @click="showCreatePost = false"><i class="fas fa-times"></i></button>
+</div>
+<div class="modal-body">
+<div class="form-group">
+<label class="form-label">Categoria</label>
+<select class="form-input" v-model="newPost.category_id" :disabled="loadingPost">
+<option value="">Selecione uma categoria</option>
+<option v-for="category in forumCategories" :key="category.id" :value="category.id">{{ category.name }}</option>
+</select>
+</div>
+<div class="form-group">
+<label class="form-label">Título</label>
+<input type="text" class="form-input" v-model="newPost.title" placeholder="Título do post" :disabled="loadingPost">
+</div>
+<div class="form-group">
+<label class="form-label">Conteúdo</label>
+<textarea class="form-input" v-model="newPost.content" placeholder="Escreva seu post aqui..." :disabled="loadingPost"></textarea>
+</div>
+<button class="btn btn-success" @click="createPost" :disabled="!newPost.category_id || !newPost.title || !newPost.content || loadingPost">
+<span class="loading" v-if="loadingPost"></span>
+<i class="fas fa-check" v-else></i> {{ loadingPost ? 'Criando...' : 'Criar Post' }}
+</button>
+</div>
+</div>
+</div>
 </div>
 <script>
 new Vue({
 el: '#app',
 data: {
 isAuthenticated: false,
-showRegister: false,
+showLoginModal: false,
+showRegisterModal: false,
 darkMode: true,
 currentView: 'dashboard',
 user: {},
@@ -1891,6 +2248,10 @@ assessmentResults: null,
 assessmentAnswers: {},
 assessmentTimer: null,
 assessmentTimeLeft: 0,
+isExamFullscreen: false,
+motivationalPhrases: ['Você consegue! 💪', 'Continue assim! 🚀', 'Está indo muito bem! ⭐', 'Não desista! 🎯', 'Foco no objetivo! 🏆', 'Cada questão te aproxima do sucesso! 📚'],
+currentPhraseIndex: 0,
+phraseTimer: null,
 showCreateTheme: false,
 showCreatePost: false,
 verificationCode: '',
@@ -1978,6 +2339,7 @@ this.token = response.data.token;
 this.isAuthenticated = true;
 this.user = response.data.user;
 this.profileForm = { full_name: response.data.user.profile?.full_name, nick: response.data.user.nick, bio: response.data.user.bio, profile_picture: response.data.user.profile_picture, age: response.data.user.profile?.age, preferred_learning_style: response.data.user.profile?.preferred_learning_style, teacher_id: response.data.user.teacher_id };
+this.showLoginModal = false;
 this.loadDashboardData();
 this.currentView = 'dashboard';
 this.showNotification('Login realizado com sucesso!', 'success');
@@ -1993,10 +2355,12 @@ this.loadingRegister = true;
 try {
 const payload = { ...this.registerForm, interests: this.registerForm.interests.split(',').map(i => i.trim()).filter(i => i), learning_goals: this.registerForm.learning_goals.split(',').map(g => g.trim()).filter(g => g) };
 const response = await axios.post('/register', payload);
-this.showRegister = false;
-this.showNotification('Conta criada com sucesso! Faça login para continuar.', 'success');
+this.showRegisterModal = false;
+this.showLoginModal = true;
 this.loginForm.username = this.registerForm.username;
-this.loginForm.password = this.registerForm.password;
+this.loginForm.password = '';
+this.registerForm = { username: '', password: '', email: '', role: 'student', full_name: '', age: null, interests: '', learning_goals: '', preferred_learning_style: 'visual', teacher_id: '' };
+this.showNotification('Conta criada com sucesso! Faça login para continuar.', 'success');
 } catch (error) {
 this.showNotification('Erro no registro: ' + (error.response?.data?.error || 'Erro ao criar conta'), 'error');
 } finally { this.loadingRegister = false; }
@@ -2106,7 +2470,7 @@ this.showNotification('Lição gerada com sucesso!', 'success');
 if (this.themeProgress.current_topic) { this.themeProgress.current_topic.progress = 10; this.themeProgress.current_topic.lessons_completed += 1; this.themeProgress.current_topic.quiz_available = true; }
 } catch (error) { this.showNotification('Erro ao gerar lição: ' + (error.response?.data?.error || 'Erro de comunicação'), 'error'); } finally { this.loadingLesson = false; }
 },
-closeLessonModal() { this.showLessonModal = false; this.activeLesson = null; },
+closeLessonModal() { this.showLessonModal = false; this.launchConfetti(); this.activeLesson = null; },
 async generateQuiz() {
 this.loadingQuiz = true;
 try {
@@ -2115,8 +2479,10 @@ this.activeAssessment = response.data;
 this.assessmentAnswers = {};
 this.assessmentResults = null;
 this.assessmentTimeLeft = 30 * 60;
+this.isExamFullscreen = true;
 this.showAssessmentModal = true;
 this.startAssessmentTimer();
+this.startPhraseRotation();
 this.showNotification('Simulado gerado com sucesso!', 'success');
 } catch (error) { this.showNotification('Erro ao gerar simulado: ' + (error.response?.data?.error || 'Erro de comunicação'), 'error'); } finally { this.loadingQuiz = false; }
 },
@@ -2128,12 +2494,14 @@ this.activeAssessment = response.data;
 this.assessmentAnswers = {};
 this.assessmentResults = null;
 this.assessmentTimeLeft = 60 * 60;
+this.isExamFullscreen = true;
 this.showAssessmentModal = true;
 this.startAssessmentTimer();
+this.startPhraseRotation();
 this.showNotification('Prova gerada com sucesso!', 'success');
 } catch (error) { this.showNotification('Erro ao gerar prova: ' + (error.response?.data?.error || 'Erro de comunicação'), 'error'); } finally { this.loadingExam = false; }
 },
-closeAssessmentModal() { this.showAssessmentModal = false; this.activeAssessment = null; if (this.assessmentTimer) { clearInterval(this.assessmentTimer); } },
+closeAssessmentModal() { this.showAssessmentModal = false; this.activeAssessment = null; this.isExamFullscreen = false; if (this.assessmentTimer) { clearInterval(this.assessmentTimer); } if (this.phraseTimer) { clearInterval(this.phraseTimer); } },
 startAssessmentTimer() {
 if (this.assessmentTimer) { clearInterval(this.assessmentTimer); }
 this.assessmentTimer = setInterval(() => { this.assessmentTimeLeft--; if (this.assessmentTimeLeft <= 0) { this.submitAssessment(); } }, 1000);
@@ -2141,11 +2509,13 @@ this.assessmentTimer = setInterval(() => { this.assessmentTimeLeft--; if (this.a
 selectAssessmentAnswer(questionIndex, answer) { this.$set(this.assessmentAnswers, questionIndex, answer); },
 async submitAssessment() {
 if (this.assessmentTimer) { clearInterval(this.assessmentTimer); }
+if (this.phraseTimer) { clearInterval(this.phraseTimer); }
 this.loadingAssessmentSubmit = true;
 try {
 const response = await axios.post('/assessment/submit', { assessment_id: this.activeAssessment.assessment_id, answers: Object.values(this.assessmentAnswers), time_spent: (this.activeAssessment.assessment_type === 'quiz' ? 30 * 60 : 60 * 60) - this.assessmentTimeLeft }, { headers: { Authorization: `Bearer ${this.token}` } });
 this.assessmentResults = response.data;
 this.showAssessmentModal = false;
+this.isExamFullscreen = false;
 this.showResultsModal = true;
 if (this.themeProgress.current_topic) {
 this.themeProgress.current_topic.progress = response.data.progress;
@@ -2157,10 +2527,10 @@ this.themeProgress.current_topic.exam_available = false;
 }
 }
 this.loadDashboardData();
-if (this.assessmentResults.passed) { this.showNotification('Avaliação concluída com sucesso!', 'success'); } else { this.showNotification('Você não atingiu a nota mínima. Tente novamente!', 'warning'); }
+if (this.assessmentResults.passed) { this.showNotification('Avaliação concluída com sucesso!', 'success'); this.launchConfetti(); } else { this.showNotification('Você não atingiu a nota mínima. Tente novamente!', 'warning'); }
 } catch (error) { this.showNotification('Erro ao enviar avaliação: ' + (error.response?.data?.error || 'Erro de comunicação'), 'error'); } finally { this.loadingAssessmentSubmit = false; }
 },
-closeResultsModal() { this.showResultsModal = false; this.assessmentResults = null; },
+closeResultsModal() { this.showResultsModal = false; if (this.assessmentResults && this.assessmentResults.passed) { this.launchConfetti(); } this.assessmentResults = null; },
 async sendHelpMessage() {
 if (!this.helpMessage.trim()) return;
 this.loadingHelp = true;
@@ -2391,6 +2761,63 @@ return new Date(dateString).toLocaleDateString('pt-BR', { day: '2-digit', month:
 showNotification(message, type = 'success') {
 this.notification = { show: true, type: type, message: message, icon: type === 'success' ? 'fas fa-check' : type === 'error' ? 'fas fa-exclamation-triangle' : 'fas fa-info-circle' };
 setTimeout(() => { this.notification.show = false; }, 5000);
+},
+launchConfetti() {
+const canvas = document.getElementById('confetti-canvas');
+if (!canvas) return;
+const ctx = canvas.getContext('2d');
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight;
+const pieces = [];
+const colors = ['#6366f1', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#06b6d4', '#f97316'];
+for (let i = 0; i < 150; i++) {
+pieces.push({
+x: Math.random() * canvas.width,
+y: Math.random() * canvas.height - canvas.height,
+w: Math.random() * 10 + 5,
+h: Math.random() * 6 + 3,
+color: colors[Math.floor(Math.random() * colors.length)],
+vy: Math.random() * 3 + 2,
+vx: Math.random() * 2 - 1,
+rotation: Math.random() * 360,
+rotationSpeed: Math.random() * 10 - 5
+});
+}
+let frames = 0;
+const animate = () => {
+ctx.clearRect(0, 0, canvas.width, canvas.height);
+pieces.forEach(p => {
+p.y += p.vy;
+p.x += p.vx;
+p.rotation += p.rotationSpeed;
+ctx.save();
+ctx.translate(p.x, p.y);
+ctx.rotate(p.rotation * Math.PI / 180);
+ctx.fillStyle = p.color;
+ctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
+ctx.restore();
+});
+frames++;
+if (frames < 180) {
+requestAnimationFrame(animate);
+} else {
+ctx.clearRect(0, 0, canvas.width, canvas.height);
+}
+};
+animate();
+},
+startPhraseRotation() {
+this.currentPhraseIndex = 0;
+if (this.phraseTimer) clearInterval(this.phraseTimer);
+this.phraseTimer = setInterval(() => {
+this.currentPhraseIndex = (this.currentPhraseIndex + 1) % this.motivationalPhrases.length;
+}, 4000);
+},
+showHelpFromExam() {
+this.showHelpModal = true;
+if (this.activeAssessment) {
+this.helpAssessmentId = this.activeAssessment.assessment_id;
+}
 }
 }
 });
